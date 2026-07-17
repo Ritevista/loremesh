@@ -59,7 +59,7 @@ is not automatically saved, and is never treated as evidence.
 - Personal feedback is isolated from organization knowledge.
 - The core is vendor-, UI-, database-, and network-independent.
 
-Start with the [product vision](docs/product/vision.md), [architecture overview](docs/architecture/overview.md), and [specifications](docs/specs/README.md). Contributors should read [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md).
+Start with the [product vision](docs/product/vision.md), [architecture overview](docs/architecture/overview.md), [code and rendering review map](docs/architecture/code-structure-and-rendering.md), and [specifications](docs/specs/README.md). Contributors should read [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md).
 
 ## Validation
 
