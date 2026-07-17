@@ -19,6 +19,12 @@ loremesh tui
 
 When running through Cargo, replace `loremesh` with `cargo run --manifest-path /path/to/loremesh/Cargo.toml -p loremesh --`. `just demo` creates a deterministic workspace under `target/demo-workspace` and prints its status.
 
+Inside the TUI, press `/` to enter a command, `Tab` or `Shift-Tab` to move focus,
+and `q`, `Esc`, `/quit`, or `/exit` to leave. Use `/help` for the command list.
+For example, `/trace` opens lineage and `/save current --format markdown-mermaid
+--output trace.md` saves the active structured view without overwriting an existing
+file.
+
 ## Principles
 
 - Imported content stays local unless a user explicitly configures a future network adapter.

@@ -12,6 +12,7 @@ use loremesh_core::{
 };
 use loremesh_report::{Metric, Report, ReportBlock, ReportSection, TableModel};
 use loremesh_storage::LocalRepository;
+use loremesh_tui::{CommandHandler, CommandResponse, SaveFormat, SlashCommand, ViewContent};
 use tracing::info;
 
 const DEMO_MARKDOWN: &str = "# Build investigation\n\nThe retry policy uses three attempts before reporting failure.\n\nThis fixture is generic and deterministic.\n";
@@ -153,7 +154,8 @@ fn run() -> Result<()> {
             command: DemoCommand::Seed,
         } => seed_demo(&current_root()?)?,
         Command::Tui => {
-            let repository = open_current()?;
+            let root = current_root()?;
+            let repository = LocalRepository::open(&root)?;
             let workspace = repository.workspace()?;
             let artifacts = repository.artifacts()?;
             let findings = repository.findings()?;
@@ -167,7 +169,8 @@ fn run() -> Result<()> {
                 &findings,
                 trace.as_ref(),
             );
-            loremesh_tui::run(&view).context("terminal dashboard failed")?;
+            let mut handler = TuiCommandHandler { root };
+            loremesh_tui::run(&view, &mut handler).context("terminal dashboard failed")?;
         }
         Command::Report {
             command: ReportCommand::Export { format, output },
@@ -179,6 +182,156 @@ fn run() -> Result<()> {
         }
     }
     Ok(())
+}
+
+struct TuiCommandHandler {
+    root: PathBuf,
+}
+
+impl CommandHandler for TuiCommandHandler {
+    fn execute(&mut self, command: &SlashCommand, active: &ViewContent) -> CommandResponse {
+        let result: Result<String> = match command {
+            SlashCommand::Services => Ok("Services: storage=local SQLite; graph=not configured; model=not configured; network=offline".into()),
+            SlashCommand::Model => Ok("No model configured. LoreMesh remains fully usable offline.".into()),
+            SlashCommand::Context => Ok(format!(
+                "Local context preview: '{}' with {} paragraph(s) and {} table row(s). Nothing was transmitted.",
+                active.title,
+                active.paragraphs.len(),
+                active.table.as_ref().map_or(0, |table| table.rows.len())
+            )),
+            SlashCommand::Compact => Ok("Compaction requires an optional configured model; no content was transmitted or changed.".into()),
+            SlashCommand::Save { format, output } => save_active_view(&self.root, active, *format, output.as_deref()),
+            SlashCommand::Help | SlashCommand::View(_) | SlashCommand::Clear | SlashCommand::Quit => Ok("Command handled by the workbench shell.".into()),
+        };
+        CommandResponse {
+            message: result.unwrap_or_else(|error| format!("Command failed: {error:#}")),
+        }
+    }
+}
+
+fn report_from_view(active: &ViewContent) -> Result<Report> {
+    let mut blocks = active
+        .paragraphs
+        .iter()
+        .cloned()
+        .map(ReportBlock::Paragraph)
+        .collect::<Vec<_>>();
+    if let Some(table) = &active.table {
+        blocks.push(ReportBlock::Table(TableModel::new(
+            active.title.clone(),
+            table.columns.clone(),
+            table.rows.clone(),
+        )?));
+    }
+    Report::new(
+        ReportId::deterministic(active.title.as_bytes()),
+        active.title.clone(),
+        vec![ReportSection::new("Current view", blocks)?],
+    )
+    .map_err(Into::into)
+}
+
+fn slug(value: &str) -> String {
+    let normalized = value
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    let compact = normalized
+        .split('-')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    if compact.is_empty() {
+        "view".into()
+    } else {
+        compact
+    }
+}
+
+fn safe_workspace_output(root: &Path, relative: &Path) -> Result<PathBuf> {
+    if relative.as_os_str().is_empty()
+        || relative.is_absolute()
+        || relative.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
+        || relative.starts_with(".loremesh")
+    {
+        bail!("output must be a safe workspace-relative path outside .loremesh");
+    }
+    Ok(root.join(relative))
+}
+
+fn save_active_view(
+    root: &Path,
+    active: &ViewContent,
+    format: SaveFormat,
+    requested: Option<&str>,
+) -> Result<String> {
+    let extension = match format {
+        SaveFormat::Markdown | SaveFormat::MarkdownMermaid | SaveFormat::MarkdownD2 => "md",
+        SaveFormat::Csv => "csv",
+        SaveFormat::Html => "html",
+        SaveFormat::Png => {
+            bail!(
+                "PNG export requires a configured local renderer; use md, markdown-mermaid, markdown-d2, csv, or html"
+            )
+        }
+    };
+    let default_name = format!("{}.{}", slug(&active.title), extension);
+    let relative = Path::new(requested.unwrap_or(&default_name));
+    let output = safe_workspace_output(root, relative)?;
+    if output.exists() {
+        bail!("refusing to overwrite existing output {}", output.display());
+    }
+
+    let report = report_from_view(active)?;
+    let rendered = match format {
+        SaveFormat::Markdown => loremesh_report::render_markdown(&report),
+        SaveFormat::MarkdownMermaid => {
+            let diagram = active
+                .mermaid
+                .as_deref()
+                .context("the active view has no Mermaid diagram")?;
+            format!(
+                "{}\n## Diagram\n\n```mermaid\n{}\n```\n",
+                loremesh_report::render_markdown(&report),
+                diagram.trim_end()
+            )
+        }
+        SaveFormat::MarkdownD2 => {
+            let diagram = active
+                .d2
+                .as_deref()
+                .context("the active view has no D2 diagram")?;
+            format!(
+                "{}\n## Diagram\n\n```d2\n{}\n```\n",
+                loremesh_report::render_markdown(&report),
+                diagram.trim_end()
+            )
+        }
+        SaveFormat::Csv => loremesh_report::render_csv(&report)?,
+        SaveFormat::Html => loremesh_report::render_html(&report),
+        SaveFormat::Png => bail!("PNG export requires a configured local renderer"),
+    };
+    if let Some(parent) = output.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("could not create {}", parent.display()))?;
+    }
+    let temporary = output.with_extension(format!("{extension}.tmp"));
+    fs::write(&temporary, rendered)
+        .with_context(|| format!("could not write temporary output {}", temporary.display()))?;
+    fs::rename(&temporary, &output)
+        .with_context(|| format!("could not finalize output {}", output.display()))?;
+    Ok(format!("Saved {}", relative.display()))
 }
 
 fn current_root() -> Result<PathBuf> {
@@ -373,4 +526,60 @@ fn export_report(format: ExportFormat, requested: Option<&Path>) -> Result<()> {
     info!(format = ?format, bytes = rendered.len(), "report exported");
     println!("Exported {}", relative.display());
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use loremesh_tui::ViewTable;
+
+    fn trace_view() -> ViewContent {
+        ViewContent {
+            title: "Evidence trace".into(),
+            paragraphs: vec!["Finding to immutable snapshot.".into()],
+            table: Some(ViewTable {
+                columns: vec!["From".into(), "To".into()],
+                rows: vec![vec!["finding".into(), "evidence".into()]],
+            }),
+            mermaid: Some("flowchart LR\n  finding --> evidence".into()),
+            d2: Some("finding -> evidence".into()),
+        }
+    }
+
+    #[test]
+    fn active_view_save_is_structured_and_never_overwrites() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let message = save_active_view(
+            directory.path(),
+            &trace_view(),
+            SaveFormat::MarkdownMermaid,
+            Some("exports/trace.md"),
+        )
+        .expect("save active view");
+        assert_eq!(message, "Saved exports/trace.md");
+        let saved =
+            fs::read_to_string(directory.path().join("exports/trace.md")).expect("read saved view");
+        assert!(saved.contains("```mermaid"));
+        assert!(saved.contains("finding --> evidence"));
+        assert!(save_active_view(
+            directory.path(),
+            &trace_view(),
+            SaveFormat::Markdown,
+            Some("exports/trace.md")
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn active_view_save_rejects_traversal_and_unconfigured_png() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        assert!(save_active_view(
+            directory.path(),
+            &trace_view(),
+            SaveFormat::Csv,
+            Some("../outside.csv")
+        )
+        .is_err());
+        assert!(save_active_view(directory.path(), &trace_view(), SaveFormat::Png, None).is_err());
+    }
 }
