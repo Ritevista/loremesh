@@ -569,6 +569,7 @@ pub struct ShellState {
     history_cursor: Option<usize>,
     should_quit: bool,
     custom: Option<ViewContent>,
+    timeline_scroll: u16,
 }
 
 impl Default for ShellState {
@@ -584,6 +585,7 @@ impl Default for ShellState {
             history_cursor: None,
             should_quit: false,
             custom: None,
+            timeline_scroll: 0,
         }
     }
 }
@@ -616,7 +618,22 @@ impl ShellState {
                 self.focus = Focus::Timeline;
                 self.history_cursor = None;
             }
-            KeyCode::Esc => self.should_quit = true,
+            KeyCode::Esc => self.focus = Focus::Timeline,
+            KeyCode::PageUp => {
+                self.focus = Focus::Timeline;
+                self.timeline_scroll = self.timeline_scroll.saturating_sub(10);
+            }
+            KeyCode::PageDown => {
+                self.focus = Focus::Timeline;
+                self.timeline_scroll = self
+                    .timeline_scroll
+                    .saturating_add(10)
+                    .min(self.maximum_scroll(view));
+            }
+            KeyCode::Home if self.focus != Focus::Input => self.timeline_scroll = 0,
+            KeyCode::End if self.focus != Focus::Input => {
+                self.timeline_scroll = self.maximum_scroll(view);
+            }
             KeyCode::Enter if self.focus == Focus::Input => self.submit(view, handler),
             KeyCode::Backspace if self.focus == Focus::Input => {
                 self.input.pop();
@@ -654,6 +671,7 @@ impl ShellState {
             Ok(SlashCommand::View(kind)) => {
                 self.active = kind;
                 self.focus = Focus::Timeline;
+                self.timeline_scroll = 0;
                 self.push_message(format!("Opened {}", view.content(kind).title));
             }
             Ok(SlashCommand::Clear) => {
@@ -681,6 +699,23 @@ impl ShellState {
         self.custom = Some(content);
         self.active = ViewKind::Custom;
         self.focus = Focus::Timeline;
+        self.timeline_scroll = 0;
+    }
+
+    fn maximum_scroll(&self, view: &DashboardView) -> u16 {
+        let content = self.content(view);
+        let lines = content.table.as_ref().map_or_else(
+            || {
+                content
+                    .paragraphs
+                    .iter()
+                    .map(|paragraph| paragraph.lines().count().max(1))
+                    .sum::<usize>()
+                    .saturating_add(self.messages.len())
+            },
+            |table| table.rows.len(),
+        );
+        u16::try_from(lines.saturating_sub(1)).map_or(u16::MAX, std::convert::identity)
     }
 
     fn content<'a>(&'a self, view: &'a DashboardView) -> &'a ViewContent {
@@ -740,7 +775,7 @@ fn text_content(title: &str, text: &str) -> ViewContent {
 fn help_content() -> ViewContent {
     text_content(
         "LoreMesh command reference",
-        "LOREMESH COMMAND REFERENCE\n\nNAVIGATION\n/help\n  Show this complete reference.\n/artifacts\n  Show imported artifacts.\n/findings\n  Show findings.\n/trace\n  Show evidence lineage.\n\nDEMONSTRATIONS\n/demo table\n/demo chart\n/demo markdown\n/demo code\n/demo shell\n  Open deterministic capability previews; no files, network, model, or shell execution required.\n\nTABLES\n/table load <workspace-relative.csv>\n/table refresh\n/table save <workspace-relative.csv>\n/table sort <column> <asc|desc>\n/table filter <column> <text>\n/table search <text>\n/table columns <column,...>\n/table reset\n\nCHARTS\n/chart <bar|hbar|line|pie> <label-column> <value-column>\n  Requires a loaded table. Example: /chart hbar name duration\n\nFILES AND MARKDOWN\n/browse [workspace-relative-directory]\n/open <workspace-relative-file>\n/search <text>\n\nLOCAL SHELL\n/shell status\n/shell enable\n/shell run <command>\n/shell disable\n  Shell execution is non-interactive, disabled at startup, limited to 10 seconds, and has your OS permissions. Command text is not retained in history.\n\nREPORTS\n/save current --format <md|markdown-mermaid|markdown-d2|csv|html|png> [--output <path>]\n/export current --format <format> [--output <path>]\n\nSERVICES\n/services\n/model\n/context\n/compact\n/clear\n\nEXIT\n/quit\n/exit\n  Outside input, q or Esc also exits.",
+        "LOREMESH COMMAND REFERENCE\n\nNAVIGATION\n/help\n  Show this complete reference.\n/artifacts\n  Show imported artifacts.\n/findings\n  Show findings.\n/trace\n  Show evidence lineage.\n\nDEMONSTRATIONS\n/demo table\n/demo chart\n/demo markdown\n/demo code\n/demo shell\n  Open deterministic capability previews; no files, network, model, or shell execution required.\n\nTABLES\n/table load <workspace-relative.csv>\n/table refresh\n/table save <workspace-relative.csv>\n/table sort <column> <asc|desc>\n/table filter <column> <text>\n/table search <text>\n/table columns <column,...>\n/table reset\n\nCHARTS\n/chart <bar|hbar|line|pie> <label-column> <value-column>\n  Requires a loaded table. Example: /chart hbar name duration\n\nFILES AND MARKDOWN\n/browse [workspace-relative-directory]\n/open <workspace-relative-file>\n/search <text>\n\nLOCAL SHELL\n/shell status\n/shell enable\n/shell run <command>\n/shell disable\n  Shell execution is non-interactive, disabled at startup, limited to 10 seconds, and has your OS permissions. Command text is not retained in history.\n\nREPORTS\n/save current --format <md|markdown-mermaid|markdown-d2|csv|html|png> [--output <path>]\n/export current --format <format> [--output <path>]\n\nSERVICES\n/services\n/model\n/context\n/compact\n/clear\n\nEXIT\n/quit\n/exit\n  Outside input, q exits. Esc always returns focus to the timeline and never exits.",
     )
 }
 
@@ -841,7 +876,7 @@ fn draw(frame: &mut ratatui::Frame<'_>, view: &DashboardView, state: &ShellState
     let latest = state.messages.back().map_or("ready", String::as_str);
     frame.render_widget(
         Paragraph::new(format!(
-            "Tab focus · / command · ↑↓ history · q or /quit exit · {latest}"
+            "Tab focus · PgUp/PgDn Home/End scroll · / command · q or /quit exit · {latest}"
         ))
         .style(Style::default().fg(Color::DarkGray)),
         rows[3],
@@ -862,6 +897,7 @@ fn draw_timeline(
         let rows = table
             .rows
             .iter()
+            .skip(usize::from(state.timeline_scroll))
             .map(|row| Row::new(row.iter().cloned().map(Cell::from)));
         frame.render_widget(
             Table::new(rows, widths)
@@ -886,6 +922,7 @@ fn draw_timeline(
         }
         frame.render_widget(
             Paragraph::new(lines.join("\n"))
+                .scroll((state.timeline_scroll, 0))
                 .wrap(Wrap { trim: false })
                 .block(focus_block(
                     "Investigation timeline",
@@ -979,6 +1016,49 @@ mod tests {
         assert!(content.paragraphs[0].contains("TABLES\n/table load"));
         assert!(content.paragraphs[0].contains("/demo shell"));
         assert!(content.paragraphs[0].contains("/shell run <command>"));
+    }
+
+    #[test]
+    fn escape_never_quits_and_timeline_scroll_is_bounded() {
+        let mut state = ShellState::default();
+        let view = view();
+        let mut handler = Handler;
+        state.show_content(ViewContent {
+            title: "Long result".into(),
+            paragraphs: vec![(0..25)
+                .map(|line| format!("line {line}"))
+                .collect::<Vec<_>>()
+                .join("\n")],
+            table: None,
+            mermaid: None,
+            d2: None,
+        });
+        state.handle_key(
+            KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE),
+            &view,
+            &mut handler,
+        );
+        assert_eq!(state.timeline_scroll, 10);
+        state.handle_key(
+            KeyEvent::new(KeyCode::End, KeyModifiers::NONE),
+            &view,
+            &mut handler,
+        );
+        assert_eq!(state.timeline_scroll, 25);
+        for _ in 0..3 {
+            state.handle_key(
+                KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+                &view,
+                &mut handler,
+            );
+        }
+        assert!(!state.should_quit());
+        state.handle_key(
+            KeyEvent::new(KeyCode::Home, KeyModifiers::NONE),
+            &view,
+            &mut handler,
+        );
+        assert_eq!(state.timeline_scroll, 0);
     }
 
     #[test]
