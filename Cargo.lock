@@ -913,6 +913,7 @@ name = "loremesh-tui"
 version = "0.1.0"
 dependencies = [
  "crossterm",
+ "csv",
  "loremesh-core",
  "proptest",
  "ratatui",

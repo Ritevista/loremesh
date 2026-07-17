@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+mod workbench;
+
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
@@ -12,6 +14,7 @@ use loremesh_core::{
 };
 use loremesh_report::{Metric, Report, ReportBlock, ReportSection, TableModel};
 use loremesh_storage::LocalRepository;
+use loremesh_tui::grid::DataGrid;
 use loremesh_tui::{CommandHandler, CommandResponse, SaveFormat, SlashCommand, ViewContent};
 use tracing::info;
 
@@ -169,7 +172,7 @@ fn run() -> Result<()> {
                 &findings,
                 trace.as_ref(),
             );
-            let mut handler = TuiCommandHandler { root };
+            let mut handler = TuiCommandHandler::new(root);
             loremesh_tui::run(&view, &mut handler).context("terminal dashboard failed")?;
         }
         Command::Report {
@@ -186,25 +189,49 @@ fn run() -> Result<()> {
 
 struct TuiCommandHandler {
     root: PathBuf,
+    grid: Option<DataGrid>,
+    grid_source: Option<PathBuf>,
+    shell_enabled: bool,
+    code_document: Option<loremesh_tui::browser::CodeDocument>,
+}
+
+impl TuiCommandHandler {
+    fn new(root: PathBuf) -> Self {
+        Self {
+            root,
+            grid: None,
+            grid_source: None,
+            shell_enabled: false,
+            code_document: None,
+        }
+    }
 }
 
 impl CommandHandler for TuiCommandHandler {
     fn execute(&mut self, command: &SlashCommand, active: &ViewContent) -> CommandResponse {
-        let result: Result<String> = match command {
-            SlashCommand::Services => Ok("Services: storage=local SQLite; graph=not configured; model=not configured; network=offline".into()),
-            SlashCommand::Model => Ok("No model configured. LoreMesh remains fully usable offline.".into()),
-            SlashCommand::Context => Ok(format!(
+        let result: Result<(String, Option<ViewContent>)> = match command {
+            SlashCommand::Services => Ok(("Services: storage=local SQLite; graph=not configured; model=not configured; network=offline".into(), None)),
+            SlashCommand::Model => Ok(("No model configured. LoreMesh remains fully usable offline.".into(), None)),
+            SlashCommand::Context => Ok((format!(
                 "Local context preview: '{}' with {} paragraph(s) and {} table row(s). Nothing was transmitted.",
                 active.title,
                 active.paragraphs.len(),
                 active.table.as_ref().map_or(0, |table| table.rows.len())
-            )),
-            SlashCommand::Compact => Ok("Compaction requires an optional configured model; no content was transmitted or changed.".into()),
-            SlashCommand::Save { format, output } => save_active_view(&self.root, active, *format, output.as_deref()),
-            SlashCommand::Help | SlashCommand::View(_) | SlashCommand::Clear | SlashCommand::Quit => Ok("Command handled by the workbench shell.".into()),
+            ), None)),
+            SlashCommand::Compact => Ok(("Compaction requires an optional configured model; no content was transmitted or changed.".into(), None)),
+            SlashCommand::Save { format, output } => save_active_view(&self.root, active, *format, output.as_deref()).map(|message| (message, None)),
+            SlashCommand::Table(command) => self.table_command(command),
+            SlashCommand::Chart { kind, label_column, value_column } => self.chart_command(*kind, label_column, value_column),
+            SlashCommand::Shell(command) => self.shell_command(command),
+            SlashCommand::Browser(command) => self.browser_command(command),
+            SlashCommand::Help | SlashCommand::View(_) | SlashCommand::Clear | SlashCommand::Quit => Ok(("Command handled by the workbench shell.".into(), None)),
         };
-        CommandResponse {
-            message: result.unwrap_or_else(|error| format!("Command failed: {error:#}")),
+        match result {
+            Ok((message, content)) => CommandResponse { message, content },
+            Err(error) => CommandResponse {
+                message: format!("Command failed: {error:#}"),
+                content: None,
+            },
         }
     }
 }
@@ -267,7 +294,18 @@ fn safe_workspace_output(root: &Path, relative: &Path) -> Result<PathBuf> {
     {
         bail!("output must be a safe workspace-relative path outside .loremesh");
     }
-    Ok(root.join(relative))
+    let mut current = root.to_path_buf();
+    for component in relative.components() {
+        if let Component::Normal(part) = component {
+            current.push(part);
+            if let Ok(metadata) = fs::symlink_metadata(&current) {
+                if metadata.file_type().is_symlink() {
+                    bail!("output path must not traverse symbolic links");
+                }
+            }
+        }
+    }
+    Ok(current)
 }
 
 fn save_active_view(
@@ -581,5 +619,22 @@ mod tests {
         )
         .is_err());
         assert!(save_active_view(directory.path(), &trace_view(), SaveFormat::Png, None).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn active_view_save_rejects_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = tempfile::tempdir().expect("workspace");
+        let outside = tempfile::tempdir().expect("outside");
+        symlink(outside.path(), workspace.path().join("escape")).expect("symlink fixture");
+        assert!(save_active_view(
+            workspace.path(),
+            &trace_view(),
+            SaveFormat::Markdown,
+            Some("escape/view.md")
+        )
+        .is_err());
     }
 }

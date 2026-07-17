@@ -1,6 +1,11 @@
 //! Reusable interactive terminal shell for `LoreMesh` workbench views.
 #![forbid(unsafe_code)]
 
+pub mod browser;
+pub mod chart;
+pub mod grid;
+pub mod markdown;
+
 use std::collections::VecDeque;
 use std::fmt::Write as _;
 use std::io;
@@ -209,7 +214,7 @@ impl DashboardView {
 
     fn content(&self, kind: ViewKind) -> &ViewContent {
         match kind {
-            ViewKind::Summary => &self.summary,
+            ViewKind::Summary | ViewKind::Custom => &self.summary,
             ViewKind::Artifacts => &self.artifacts,
             ViewKind::Findings => &self.findings,
             ViewKind::Trace => &self.trace,
@@ -250,6 +255,34 @@ pub enum ViewKind {
     Artifacts,
     Findings,
     Trace,
+    Custom,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TableCommand {
+    Load(String),
+    Refresh,
+    Save(String),
+    Sort { column: String, descending: bool },
+    Filter { column: String, value: String },
+    Search(String),
+    Columns(Vec<String>),
+    Reset,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ShellCommand {
+    Status,
+    Enable,
+    Disable,
+    Run(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BrowserCommand {
+    Browse(Option<String>),
+    Open(String),
+    Search(String),
 }
 
 /// Supported structured save format.
@@ -277,6 +310,14 @@ pub enum SlashCommand {
         format: SaveFormat,
         output: Option<String>,
     },
+    Table(TableCommand),
+    Chart {
+        kind: chart::ChartKind,
+        label_column: String,
+        value_column: String,
+    },
+    Shell(ShellCommand),
+    Browser(BrowserCommand),
     Quit,
 }
 
@@ -301,9 +342,127 @@ pub fn parse_command(input: &str) -> Result<SlashCommand, CommandError> {
         "/context" => no_args(parts, SlashCommand::Context),
         "/compact" => no_args(parts, SlashCommand::Compact),
         "/clear" => no_args(parts, SlashCommand::Clear),
+        "/table" => parse_table(parts),
+        "/chart" => parse_chart(parts),
+        "/shell" => parse_shell(parts),
+        "/browse" => {
+            let path = parts.collect::<Vec<_>>().join(" ");
+            Ok(SlashCommand::Browser(BrowserCommand::Browse(
+                (!path.is_empty()).then_some(path),
+            )))
+        }
+        "/open" => one_rest(parts, "usage: /open <path>")
+            .map(|path| SlashCommand::Browser(BrowserCommand::Open(path))),
+        "/search" => one_rest(parts, "usage: /search <text>")
+            .map(|query| SlashCommand::Browser(BrowserCommand::Search(query))),
         "/quit" | "/exit" => no_args(parts, SlashCommand::Quit),
         "/save" | "/export" => parse_save(parts),
         _ => Err(CommandError(format!("unknown command '{name}'; use /help"))),
+    }
+}
+
+fn one_rest<'a>(parts: impl Iterator<Item = &'a str>, usage: &str) -> Result<String, CommandError> {
+    let value = parts.collect::<Vec<_>>().join(" ");
+    if value.is_empty() {
+        Err(CommandError(usage.into()))
+    } else {
+        Ok(value)
+    }
+}
+
+fn parse_table<'a>(mut parts: impl Iterator<Item = &'a str>) -> Result<SlashCommand, CommandError> {
+    let action = parts.next().ok_or_else(|| {
+        CommandError("usage: /table <load|refresh|save|sort|filter|search|columns|reset>".into())
+    })?;
+    let command = match action {
+        "load" => TableCommand::Load(one_rest(parts, "usage: /table load <path>")?),
+        "save" => TableCommand::Save(one_rest(parts, "usage: /table save <path>")?),
+        "refresh" => return no_args(parts, SlashCommand::Table(TableCommand::Refresh)),
+        "reset" => return no_args(parts, SlashCommand::Table(TableCommand::Reset)),
+        "search" => TableCommand::Search(parts.collect::<Vec<_>>().join(" ")),
+        "columns" => {
+            let names = one_rest(parts, "usage: /table columns <name,...>")?
+                .split(',')
+                .map(|name| name.trim().to_owned())
+                .collect();
+            TableCommand::Columns(names)
+        }
+        "sort" => {
+            let column = parts
+                .next()
+                .ok_or_else(|| CommandError("usage: /table sort <column> <asc|desc>".into()))?;
+            let descending = match parts.next() {
+                Some("asc") => false,
+                Some("desc") => true,
+                _ => {
+                    return Err(CommandError(
+                        "usage: /table sort <column> <asc|desc>".into(),
+                    ))
+                }
+            };
+            if parts.next().is_some() {
+                return Err(CommandError(
+                    "usage: /table sort <column> <asc|desc>".into(),
+                ));
+            }
+            TableCommand::Sort {
+                column: column.into(),
+                descending,
+            }
+        }
+        "filter" => {
+            let column = parts
+                .next()
+                .ok_or_else(|| CommandError("usage: /table filter <column> <text>".into()))?;
+            let value = parts.collect::<Vec<_>>().join(" ");
+            TableCommand::Filter {
+                column: column.into(),
+                value,
+            }
+        }
+        _ => return Err(CommandError(format!("unknown table action '{action}'"))),
+    };
+    Ok(SlashCommand::Table(command))
+}
+
+fn parse_chart<'a>(mut parts: impl Iterator<Item = &'a str>) -> Result<SlashCommand, CommandError> {
+    let kind = match parts.next() {
+        Some("bar") => chart::ChartKind::Bar,
+        Some("hbar") => chart::ChartKind::HorizontalBar,
+        Some("line") => chart::ChartKind::Line,
+        Some("pie") => chart::ChartKind::Pie,
+        _ => {
+            return Err(CommandError(
+                "usage: /chart <bar|hbar|line|pie> <label-column> <value-column>".into(),
+            ))
+        }
+    };
+    let label_column = parts
+        .next()
+        .ok_or_else(|| CommandError("chart label column is required".into()))?;
+    let value_column = parts
+        .next()
+        .ok_or_else(|| CommandError("chart value column is required".into()))?;
+    if parts.next().is_some() {
+        return Err(CommandError("chart accepts exactly two columns".into()));
+    }
+    Ok(SlashCommand::Chart {
+        kind,
+        label_column: label_column.into(),
+        value_column: value_column.into(),
+    })
+}
+
+fn parse_shell<'a>(mut parts: impl Iterator<Item = &'a str>) -> Result<SlashCommand, CommandError> {
+    match parts.next() {
+        Some("status") => no_args(parts, SlashCommand::Shell(ShellCommand::Status)),
+        Some("enable") => no_args(parts, SlashCommand::Shell(ShellCommand::Enable)),
+        Some("disable") => no_args(parts, SlashCommand::Shell(ShellCommand::Disable)),
+        Some("run") => one_rest(parts, "usage: /shell run <command>")
+            .map(|command| SlashCommand::Shell(ShellCommand::Run(command))),
+        _ => Err(CommandError(
+            "usage: /shell <status|enable|disable|run>".into(),
+        )),
     }
 }
 
@@ -364,6 +523,7 @@ fn parse_save<'a>(mut parts: impl Iterator<Item = &'a str>) -> Result<SlashComma
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandResponse {
     pub message: String,
+    pub content: Option<ViewContent>,
 }
 
 /// Application boundary for commands that require services or filesystem I/O.
@@ -381,6 +541,7 @@ pub struct ShellState {
     history: VecDeque<String>,
     history_cursor: Option<usize>,
     should_quit: bool,
+    custom: Option<ViewContent>,
 }
 
 impl Default for ShellState {
@@ -395,6 +556,7 @@ impl Default for ShellState {
             history: VecDeque::new(),
             history_cursor: None,
             should_quit: false,
+            custom: None,
         }
     }
 }
@@ -450,13 +612,16 @@ impl ShellState {
         if input.is_empty() {
             return;
         }
-        self.history.push_back(input.clone());
-        while self.history.len() > MAX_HISTORY {
-            self.history.pop_front();
+        let parsed = parse_command(&input);
+        if !matches!(&parsed, Ok(SlashCommand::Shell(ShellCommand::Run(_)))) {
+            self.history.push_back(input);
+            while self.history.len() > MAX_HISTORY {
+                self.history.pop_front();
+            }
         }
-        match parse_command(&input) {
+        match parsed {
             Ok(SlashCommand::Help) => self.push_message(
-                "Commands: /help /artifacts /findings /trace /services /model /context /compact /clear /save /export /quit",
+                "Commands: /help /artifacts /findings /trace /table /chart /browse /open /search /shell /services /model /context /compact /clear /save /export /quit",
             ),
             Ok(SlashCommand::View(kind)) => {
                 self.active = kind;
@@ -465,10 +630,22 @@ impl ShellState {
             Ok(SlashCommand::Clear) => self.messages.clear(),
             Ok(SlashCommand::Quit) => self.should_quit = true,
             Ok(command) => {
-                let response = handler.execute(&command, view.content(self.active));
+                let response = handler.execute(&command, self.content(view));
                 self.push_message(response.message);
+                if let Some(content) = response.content {
+                    self.custom = Some(content);
+                    self.active = ViewKind::Custom;
+                }
             }
             Err(error) => self.push_message(error.to_string()),
+        }
+    }
+
+    fn content<'a>(&'a self, view: &'a DashboardView) -> &'a ViewContent {
+        if self.active == ViewKind::Custom {
+            self.custom.as_ref().unwrap_or(&view.summary)
+        } else {
+            view.content(self.active)
         }
     }
 
@@ -582,7 +759,7 @@ fn draw(frame: &mut ratatui::Frame<'_>, view: &DashboardView, state: &ShellState
         .constraints([Constraint::Percentage(68), Constraint::Percentage(32)])
         .split(rows[1]);
     draw_timeline(frame, body[0], view, state);
-    let active = view.content(state.active);
+    let active = state.content(view);
     frame.render_widget(
         Paragraph::new(active.detail_text())
             .wrap(Wrap { trim: false })
@@ -618,7 +795,7 @@ fn draw_timeline(
     view: &DashboardView,
     state: &ShellState,
 ) {
-    let active = view.content(state.active);
+    let active = state.content(view);
     if let Some(table) = &active.table {
         let widths = (0..table.columns.len())
             .map(|_| Constraint::Fill(1))
@@ -672,6 +849,7 @@ mod tests {
         fn execute(&mut self, command: &SlashCommand, _: &ViewContent) -> CommandResponse {
             CommandResponse {
                 message: format!("handled {command:?}"),
+                content: None,
             }
         }
     }
@@ -695,6 +873,45 @@ mod tests {
                 output: Some("trace.md".into())
             })
         );
+    }
+
+    #[test]
+    fn data_browser_chart_and_shell_commands_are_typed() {
+        assert_eq!(
+            parse_command("/table sort score desc"),
+            Ok(SlashCommand::Table(TableCommand::Sort {
+                column: "score".into(),
+                descending: true,
+            }))
+        );
+        assert!(matches!(
+            parse_command("/chart hbar name score"),
+            Ok(SlashCommand::Chart {
+                kind: chart::ChartKind::HorizontalBar,
+                ..
+            })
+        ));
+        assert_eq!(
+            parse_command("/open src/lib.rs"),
+            Ok(SlashCommand::Browser(BrowserCommand::Open(
+                "src/lib.rs".into()
+            )))
+        );
+        assert_eq!(
+            parse_command("/shell run echo hello"),
+            Ok(SlashCommand::Shell(ShellCommand::Run("echo hello".into())))
+        );
+    }
+
+    #[test]
+    fn shell_command_text_is_not_retained_in_history() {
+        let mut state = ShellState {
+            focus: Focus::Input,
+            input: "/shell run echo private".into(),
+            ..ShellState::default()
+        };
+        state.submit(&view(), &mut Handler);
+        assert!(state.history.is_empty());
     }
 
     #[test]

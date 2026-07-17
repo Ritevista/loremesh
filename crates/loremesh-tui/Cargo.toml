@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 crossterm.workspace = true
+csv.workspace = true
 loremesh-core = { version = "0.1.0", path = "../loremesh-core" }
 ratatui.workspace = true
 thiserror.workspace = true
