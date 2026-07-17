@@ -10,3 +10,4 @@ ADRs are immutable decision history. Statuses are Proposed, Accepted, Superseded
 | 0004 | Ports and adapters | Accepted |
 | 0005 | Subprocess engine protocol | Proposed |
 | 0006 | Dual license | Accepted |
+| 0007 | Reusable workbench shell inside the monolith | Accepted |

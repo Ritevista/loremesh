@@ -9,3 +9,4 @@ Specifications define observable behaviour and acceptance tests. `Status: Accept
 | [Trace model](trace-model.md) | Accepted |
 | [Feedback scopes](feedback-scopes.md) | Accepted |
 | [Report model](report-model.md) | Accepted |
+| [Interactive workbench shell](interactive-workbench-shell.md) | Accepted |
