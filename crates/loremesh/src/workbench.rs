@@ -10,7 +10,7 @@ use loremesh_tui::browser::{neutralize_terminal, CodeDocument, FileTreeEntry};
 use loremesh_tui::chart::{ChartKind, ChartModel};
 use loremesh_tui::grid::{DataGrid, SortDirection};
 use loremesh_tui::markdown::MarkdownDocument;
-use loremesh_tui::{BrowserCommand, ShellCommand, TableCommand, ViewContent, ViewTable};
+use loremesh_tui::{BrowserCommand, DemoKind, ShellCommand, TableCommand, ViewContent, ViewTable};
 
 use crate::{safe_workspace_output, TuiCommandHandler};
 
@@ -19,6 +19,57 @@ const MAX_PROCESS_OUTPUT: usize = 64 * 1024;
 const PROCESS_TIMEOUT: Duration = Duration::from_secs(10);
 
 impl TuiCommandHandler {
+    pub(super) fn demo_command(&self, kind: DemoKind) -> (String, Option<ViewContent>) {
+        let content = match kind {
+            DemoKind::Table => ViewContent {
+                title: "Demo: sortable table".into(),
+                paragraphs: vec!["Try: /table load <file.csv> to work with local data.".into()],
+                table: Some(ViewTable {
+                    columns: vec!["name".into(), "status".into(), "duration".into()],
+                    rows: vec![
+                        vec!["compile".into(), "passed".into(), "12".into()],
+                        vec!["test".into(), "failed".into(), "31".into()],
+                        vec!["package".into(), "waiting".into(), "5".into()],
+                    ],
+                }),
+                mermaid: None,
+                d2: None,
+            },
+            DemoKind::Chart => ViewContent {
+                title: "Demo: horizontal bar chart".into(),
+                paragraphs: vec!["compile           12.00 ████████████\ntest              31.00 ███████████████████████████████\npackage            5.00 █████".into()],
+                table: None,
+                mermaid: None,
+                d2: None,
+            },
+            DemoKind::Markdown => ViewContent {
+                title: "Demo: Markdown and diagrams".into(),
+                paragraphs: vec!["# Investigation\n\n• Evidence remains local\n\nMermaid/D2 preview:\nsource ──▶ evidence ──▶ finding\n\nOriginal diagram source remains available when imported from a file.".into()],
+                table: None,
+                mermaid: Some("flowchart LR\n  source --> evidence\n  evidence --> finding".into()),
+                d2: Some("source -> evidence -> finding".into()),
+            },
+            DemoKind::Code => ViewContent {
+                title: "Demo: code browser".into(),
+                paragraphs: vec!["1 │ fn investigate() -> Result<()> {\n2 │     collect_evidence()?;\n3 │     Ok(())\n4 │ }\n\nTry: /browse . or /open README.md".into()],
+                table: None,
+                mermaid: None,
+                d2: None,
+            },
+            DemoKind::Shell => ViewContent {
+                title: "Demo: local shell boundary".into(),
+                paragraphs: vec![format!(
+                    "status: {}\nmode: non-interactive\ntime limit: 10 seconds\noutput limit: 64 KiB per stream\nhistory: command text not retained\n\nTry:\n/shell enable\n/shell run pwd\n/shell disable",
+                    if self.shell_enabled { "enabled" } else { "disabled" }
+                )],
+                table: None,
+                mermaid: None,
+                d2: None,
+            },
+        };
+        (format!("Opened {kind:?} demo"), Some(content))
+    }
+
     pub(super) fn table_command(
         &mut self,
         command: &TableCommand,
@@ -174,24 +225,32 @@ impl TuiCommandHandler {
         command: &ShellCommand,
     ) -> Result<(String, Option<ViewContent>)> {
         match command {
-            ShellCommand::Status => Ok((
-                format!(
+            ShellCommand::Status => {
+                let message = format!(
                     "Local shell is {}",
                     if self.shell_enabled {
                         "enabled"
                     } else {
                         "disabled"
                     }
-                ),
-                None,
-            )),
+                );
+                Ok((message.clone(), Some(text_view("Shell status", message))))
+            }
             ShellCommand::Enable => {
                 self.shell_enabled = true;
-                Ok(("Local shell enabled for this session. Commands have your OS permissions and may access files or networks.".into(), None))
+                let message = "Local shell enabled for this session. Commands have your OS permissions and may access files or networks.";
+                Ok((
+                    message.into(),
+                    Some(text_view("Shell enabled", message.into())),
+                ))
             }
             ShellCommand::Disable => {
                 self.shell_enabled = false;
-                Ok(("Local shell disabled".into(), None))
+                let message = "Local shell disabled";
+                Ok((
+                    message.into(),
+                    Some(text_view("Shell disabled", message.into())),
+                ))
             }
             ShellCommand::Run(command) => {
                 if !self.shell_enabled {
@@ -468,6 +527,24 @@ mod tests {
         assert!(workbench
             .shell_command(&ShellCommand::Run("echo allowed".into()))
             .is_ok());
+    }
+
+    #[test]
+    fn every_demo_produces_visual_content_without_external_input() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let workbench = handler(temporary.path());
+        for kind in [
+            DemoKind::Table,
+            DemoKind::Chart,
+            DemoKind::Markdown,
+            DemoKind::Code,
+            DemoKind::Shell,
+        ] {
+            let (_, content) = workbench.demo_command(kind);
+            let content = content.expect("demo content");
+            assert!(!content.title.is_empty());
+            assert!(!content.paragraphs.is_empty());
+        }
     }
 
     #[test]

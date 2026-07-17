@@ -210,29 +210,44 @@ impl TuiCommandHandler {
 impl CommandHandler for TuiCommandHandler {
     fn execute(&mut self, command: &SlashCommand, active: &ViewContent) -> CommandResponse {
         let result: Result<(String, Option<ViewContent>)> = match command {
-            SlashCommand::Services => Ok(("Services: storage=local SQLite; graph=not configured; model=not configured; network=offline".into(), None)),
-            SlashCommand::Model => Ok(("No model configured. LoreMesh remains fully usable offline.".into(), None)),
-            SlashCommand::Context => Ok((format!(
+            SlashCommand::Services => Ok(message_result("Services", "storage: local SQLite\ngraph: not configured\nmodel: not configured\nnetwork: offline")),
+            SlashCommand::Model => Ok(message_result("Model", "No model configured. LoreMesh remains fully usable offline.")),
+            SlashCommand::Context => Ok(message_result("Context", &format!(
                 "Local context preview: '{}' with {} paragraph(s) and {} table row(s). Nothing was transmitted.",
                 active.title,
                 active.paragraphs.len(),
                 active.table.as_ref().map_or(0, |table| table.rows.len())
-            ), None)),
-            SlashCommand::Compact => Ok(("Compaction requires an optional configured model; no content was transmitted or changed.".into(), None)),
-            SlashCommand::Save { format, output } => save_active_view(&self.root, active, *format, output.as_deref()).map(|message| (message, None)),
+            ))),
+            SlashCommand::Compact => Ok(message_result("Compact", "Compaction requires an optional configured model; no content was transmitted or changed.")),
+            SlashCommand::Save { format, output } => save_active_view(&self.root, active, *format, output.as_deref()).map(|message| message_result("Save result", &message)),
             SlashCommand::Table(command) => self.table_command(command),
             SlashCommand::Chart { kind, label_column, value_column } => self.chart_command(*kind, label_column, value_column),
             SlashCommand::Shell(command) => self.shell_command(command),
             SlashCommand::Browser(command) => self.browser_command(command),
-            SlashCommand::Help | SlashCommand::View(_) | SlashCommand::Clear | SlashCommand::Quit => Ok(("Command handled by the workbench shell.".into(), None)),
+            SlashCommand::Demo(kind) => Ok(self.demo_command(*kind)),
+            SlashCommand::Help | SlashCommand::View(_) | SlashCommand::Clear | SlashCommand::Quit => Ok(message_result("Workbench", "Command handled by the workbench shell.")),
         };
         match result {
             Ok((message, content)) => CommandResponse { message, content },
             Err(error) => CommandResponse {
                 message: format!("Command failed: {error:#}"),
-                content: None,
+                content: Some(message_view("Command failed", &format!("{error:#}"))),
             },
         }
+    }
+}
+
+fn message_result(title: &str, message: &str) -> (String, Option<ViewContent>) {
+    (message.into(), Some(message_view(title, message)))
+}
+
+fn message_view(title: &str, message: &str) -> ViewContent {
+    ViewContent {
+        title: title.into(),
+        paragraphs: vec![message.into()],
+        table: None,
+        mermaid: None,
+        d2: None,
     }
 }
 

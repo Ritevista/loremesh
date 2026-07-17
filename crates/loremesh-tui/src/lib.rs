@@ -285,6 +285,15 @@ pub enum BrowserCommand {
     Search(String),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DemoKind {
+    Table,
+    Chart,
+    Markdown,
+    Code,
+    Shell,
+}
+
 /// Supported structured save format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SaveFormat {
@@ -318,6 +327,7 @@ pub enum SlashCommand {
     },
     Shell(ShellCommand),
     Browser(BrowserCommand),
+    Demo(DemoKind),
     Quit,
 }
 
@@ -342,6 +352,7 @@ pub fn parse_command(input: &str) -> Result<SlashCommand, CommandError> {
         "/context" => no_args(parts, SlashCommand::Context),
         "/compact" => no_args(parts, SlashCommand::Compact),
         "/clear" => no_args(parts, SlashCommand::Clear),
+        "/demo" => parse_demo(parts),
         "/table" => parse_table(parts),
         "/chart" => parse_chart(parts),
         "/shell" => parse_shell(parts),
@@ -359,6 +370,22 @@ pub fn parse_command(input: &str) -> Result<SlashCommand, CommandError> {
         "/save" | "/export" => parse_save(parts),
         _ => Err(CommandError(format!("unknown command '{name}'; use /help"))),
     }
+}
+
+fn parse_demo<'a>(mut parts: impl Iterator<Item = &'a str>) -> Result<SlashCommand, CommandError> {
+    let kind = match parts.next() {
+        Some("table") => DemoKind::Table,
+        Some("chart") => DemoKind::Chart,
+        Some("markdown") => DemoKind::Markdown,
+        Some("code") => DemoKind::Code,
+        Some("shell") => DemoKind::Shell,
+        _ => {
+            return Err(CommandError(
+                "usage: /demo <table|chart|markdown|code|shell>".into(),
+            ))
+        }
+    };
+    no_args(parts, SlashCommand::Demo(kind))
 }
 
 fn one_rest<'a>(parts: impl Iterator<Item = &'a str>, usage: &str) -> Result<String, CommandError> {
@@ -620,25 +647,40 @@ impl ShellState {
             }
         }
         match parsed {
-            Ok(SlashCommand::Help) => self.push_message(
-                "Commands: /help /artifacts /findings /trace /table /chart /browse /open /search /shell /services /model /context /compact /clear /save /export /quit",
-            ),
+            Ok(SlashCommand::Help) => {
+                self.show_content(help_content());
+                self.push_message("Opened command reference");
+            }
             Ok(SlashCommand::View(kind)) => {
                 self.active = kind;
+                self.focus = Focus::Timeline;
                 self.push_message(format!("Opened {}", view.content(kind).title));
             }
-            Ok(SlashCommand::Clear) => self.messages.clear(),
+            Ok(SlashCommand::Clear) => {
+                self.messages.clear();
+                self.focus = Focus::Timeline;
+            }
             Ok(SlashCommand::Quit) => self.should_quit = true,
             Ok(command) => {
                 let response = handler.execute(&command, self.content(view));
                 self.push_message(response.message);
+                self.focus = Focus::Timeline;
                 if let Some(content) = response.content {
-                    self.custom = Some(content);
-                    self.active = ViewKind::Custom;
+                    self.show_content(content);
                 }
             }
-            Err(error) => self.push_message(error.to_string()),
+            Err(error) => {
+                let message = error.to_string();
+                self.show_content(text_content("Command error", &message));
+                self.push_message(message);
+            }
         }
+    }
+
+    fn show_content(&mut self, content: ViewContent) {
+        self.custom = Some(content);
+        self.active = ViewKind::Custom;
+        self.focus = Focus::Timeline;
     }
 
     fn content<'a>(&'a self, view: &'a DashboardView) -> &'a ViewContent {
@@ -683,6 +725,23 @@ impl ShellState {
             }
         }
     }
+}
+
+fn text_content(title: &str, text: &str) -> ViewContent {
+    ViewContent {
+        title: title.into(),
+        paragraphs: vec![text.into()],
+        table: None,
+        mermaid: None,
+        d2: None,
+    }
+}
+
+fn help_content() -> ViewContent {
+    text_content(
+        "LoreMesh command reference",
+        "LOREMESH COMMAND REFERENCE\n\nNAVIGATION\n/help\n  Show this complete reference.\n/artifacts\n  Show imported artifacts.\n/findings\n  Show findings.\n/trace\n  Show evidence lineage.\n\nDEMONSTRATIONS\n/demo table\n/demo chart\n/demo markdown\n/demo code\n/demo shell\n  Open deterministic capability previews; no files, network, model, or shell execution required.\n\nTABLES\n/table load <workspace-relative.csv>\n/table refresh\n/table save <workspace-relative.csv>\n/table sort <column> <asc|desc>\n/table filter <column> <text>\n/table search <text>\n/table columns <column,...>\n/table reset\n\nCHARTS\n/chart <bar|hbar|line|pie> <label-column> <value-column>\n  Requires a loaded table. Example: /chart hbar name duration\n\nFILES AND MARKDOWN\n/browse [workspace-relative-directory]\n/open <workspace-relative-file>\n/search <text>\n\nLOCAL SHELL\n/shell status\n/shell enable\n/shell run <command>\n/shell disable\n  Shell execution is non-interactive, disabled at startup, limited to 10 seconds, and has your OS permissions. Command text is not retained in history.\n\nREPORTS\n/save current --format <md|markdown-mermaid|markdown-d2|csv|html|png> [--output <path>]\n/export current --format <format> [--output <path>]\n\nSERVICES\n/services\n/model\n/context\n/compact\n/clear\n\nEXIT\n/quit\n/exit\n  Outside input, q or Esc also exits.",
+    )
 }
 
 /// Runs the interactive shell until a quit command or key is received.
@@ -901,6 +960,25 @@ mod tests {
             parse_command("/shell run echo hello"),
             Ok(SlashCommand::Shell(ShellCommand::Run("echo hello".into())))
         );
+        assert_eq!(
+            parse_command("/demo markdown"),
+            Ok(SlashCommand::Demo(DemoKind::Markdown))
+        );
+    }
+
+    #[test]
+    fn help_replaces_timeline_with_multiline_reference() {
+        let mut state = ShellState {
+            focus: Focus::Input,
+            input: "/help".into(),
+            ..ShellState::default()
+        };
+        state.submit(&view(), &mut Handler);
+        let content = state.custom.expect("help content");
+        assert_eq!(state.focus, Focus::Timeline);
+        assert!(content.paragraphs[0].contains("TABLES\n/table load"));
+        assert!(content.paragraphs[0].contains("/demo shell"));
+        assert!(content.paragraphs[0].contains("/shell run <command>"));
     }
 
     #[test]
