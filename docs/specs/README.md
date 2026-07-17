@@ -11,3 +11,4 @@ Specifications define observable behaviour and acceptance tests. `Status: Accept
 | [Report model](report-model.md) | Accepted |
 | [Interactive workbench shell](interactive-workbench-shell.md) | Accepted |
 | [Data workbench](data-workbench.md) | Proposed |
+| [Code and rich Markdown browser](code-and-markdown-browser.md) | Proposed |
