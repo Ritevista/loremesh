@@ -1,0 +1,28 @@
+name: Feature proposal
+description: Propose externally observable behaviour.
+title: "feat: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: User problem
+      description: Describe the problem independently of a proposed implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: scenarios
+    attributes:
+      label: Scenarios and acceptance criteria
+    validations:
+      required: true
+  - type: textarea
+    id: privacy
+    attributes:
+      label: Offline, security, and privacy impact
+    validations:
+      required: true
+  - type: textarea
+    id: non_goals
+    attributes:
+      label: Non-goals

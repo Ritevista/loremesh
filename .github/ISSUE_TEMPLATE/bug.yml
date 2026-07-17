@@ -1,0 +1,32 @@
+name: Bug report
+description: Report reproducible incorrect behaviour without private data.
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Never include credentials or private workspace content. Use SECURITY.md for vulnerabilities.
+  - type: textarea
+    id: behaviour
+    attributes:
+      label: Observed behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Deterministic reproduction
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: LoreMesh revision and platform
+    validations:
+      required: true
