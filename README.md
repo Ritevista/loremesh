@@ -25,6 +25,24 @@ For example, `/trace` opens lineage and `/save current --format markdown-mermaid
 --output trace.md` saves the active structured view without overwriting an existing
 file.
 
+Workbench data and source commands are also available:
+
+```text
+/table load results.csv
+/table filter status failed
+/table sort duration desc
+/chart hbar name duration
+/browse src
+/open README.md
+/search lineage
+/shell status
+```
+
+Local shell execution is disabled on every startup. `/shell enable` enables it only
+for the current TUI session; commands have the user's operating-system permissions
+and may access files or networks. Output is bounded, marked untrusted, and is not
+automatically saved or treated as evidence.
+
 ## Principles
 
 - Imported content stays local unless a user explicitly configures a future network adapter.

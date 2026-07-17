@@ -1,6 +1,6 @@
 # ADR 0008: Make local tool execution an explicit trust boundary
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-17
 
 ## Context

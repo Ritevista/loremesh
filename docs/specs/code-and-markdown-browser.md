@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed for the next workbench implementation sequence.
+Accepted. The initial bounded file listing/open/search and semantic Markdown/diagram-source subset is implemented; recursive tree interaction and external renderers remain deferred.
 
 ## Problem
 

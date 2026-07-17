@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed for the next vertical slice.
+Accepted. The initial synchronous grid, CSV, chart, and guarded shell subset is implemented; richer navigation and asynchronous execution remain deferred.
 
 ## Problem
 

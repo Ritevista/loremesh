@@ -35,7 +35,7 @@ One region is focused; history and messages are bounded; command parsing never p
 Unknown command, malformed option, unavailable model/service, missing table, unsafe path, existing destination, rendering failure, terminal I/O failure, and storage I/O failure produce visible actionable messages without losing workspace state.
 
 ## Security and privacy implications
-Commands never invoke a shell. Network/model operations remain unavailable unless explicitly configured later. Saved views omit absolute paths and personal overlays by default. Messages and history must not contain source bodies or credentials. HTML escapes untrusted values.
+Ordinary commands never invoke a shell. The separately specified `/shell` boundary is disabled at startup and requires explicit per-session enablement. Network/model operations remain unavailable unless explicitly configured later. Saved views omit absolute paths and personal overlays by default. Messages and history must not contain source bodies or credentials. HTML escapes untrusted values.
 
 ## Observability requirements
 The status row shows offline/service state. Command responses name operation and destination but not exported content. Future tracing records command names, outcome categories, and durations only.
