@@ -15,7 +15,9 @@ use loremesh_core::{
 use loremesh_report::{Metric, Report, ReportBlock, ReportSection, TableModel};
 use loremesh_storage::LocalRepository;
 use loremesh_tui::grid::DataGrid;
-use loremesh_tui::{CommandHandler, CommandResponse, SaveFormat, SlashCommand, ViewContent};
+use loremesh_tui::{
+    CommandHandler, CommandResponse, InputMode, SaveFormat, SlashCommand, ViewContent,
+};
 use tracing::info;
 
 const DEMO_MARKDOWN: &str = "# Build investigation\n\nThe retry policy uses three attempts before reporting failure.\n\nThis fixture is generic and deterministic.\n";
@@ -193,6 +195,8 @@ struct TuiCommandHandler {
     grid_source: Option<PathBuf>,
     shell_enabled: bool,
     code_document: Option<loremesh_tui::browser::CodeDocument>,
+    shell_session: Option<workbench::PtySession>,
+    pending_input_mode: Option<InputMode>,
 }
 
 impl TuiCommandHandler {
@@ -203,6 +207,8 @@ impl TuiCommandHandler {
             grid_source: None,
             shell_enabled: false,
             code_document: None,
+            shell_session: None,
+            pending_input_mode: None,
         }
     }
 }
@@ -228,12 +234,25 @@ impl CommandHandler for TuiCommandHandler {
             SlashCommand::Help | SlashCommand::View(_) | SlashCommand::Clear | SlashCommand::Quit => Ok(message_result("Workbench", "Command handled by the workbench shell.")),
         };
         match result {
-            Ok((message, content)) => CommandResponse { message, content },
+            Ok((message, content)) => CommandResponse {
+                message,
+                content,
+                input_mode: self.pending_input_mode.take(),
+            },
             Err(error) => CommandResponse {
                 message: format!("Command failed: {error:#}"),
                 content: Some(message_view("Command failed", &format!("{error:#}"))),
+                input_mode: self.pending_input_mode.take(),
             },
         }
+    }
+
+    fn poll(&mut self) -> Option<CommandResponse> {
+        self.poll_shell()
+    }
+
+    fn resize(&mut self, rows: u16, cols: u16) {
+        self.resize_shell(rows, cols);
     }
 }
 

@@ -2,6 +2,7 @@ use std::fs;
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -11,14 +12,148 @@ use loremesh_tui::chart::{ChartKind, ChartModel};
 use loremesh_tui::grid::{DataGrid, SortDirection};
 use loremesh_tui::markdown::MarkdownDocument;
 use loremesh_tui::{BrowserCommand, DemoKind, ShellCommand, TableCommand, ViewContent, ViewTable};
+use loremesh_tui::{CommandResponse, InputMode};
+use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 
 use crate::{safe_workspace_output, TuiCommandHandler};
 
 const MAX_VIEW_BYTES: usize = 1024 * 1024;
 const MAX_PROCESS_OUTPUT: usize = 64 * 1024;
 const PROCESS_TIMEOUT: Duration = Duration::from_secs(10);
+const MAX_PTY_SCROLLBACK: usize = 256 * 1024;
+
+pub(super) struct PtySession {
+    writer: Box<dyn Write + Send>,
+    child: Box<dyn Child + Send>,
+    master: Box<dyn MasterPty + Send>,
+    output: Receiver<Vec<u8>>,
+    scrollback: String,
+    size: (u16, u16),
+}
+
+impl PtySession {
+    fn start(root: &Path) -> Result<Self> {
+        let pair = native_pty_system().openpty(PtySize {
+            rows: 30,
+            cols: 120,
+            pixel_width: 0,
+            pixel_height: 0,
+        })?;
+        let mut command = CommandBuilder::new_default_prog();
+        command.cwd(root);
+        let child = pair.slave.spawn_command(command)?;
+        let mut reader = pair.master.try_clone_reader()?;
+        let writer = pair.master.take_writer()?;
+        let (sender, output) = mpsc::channel();
+        thread::spawn(move || {
+            let mut buffer = [0_u8; 8192];
+            loop {
+                match reader.read(&mut buffer) {
+                    Ok(0) | Err(_) => break,
+                    Ok(read) => {
+                        if sender.send(buffer[..read].to_vec()).is_err() {
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+        drop(pair.slave);
+        Ok(Self {
+            writer,
+            child,
+            master: pair.master,
+            output,
+            scrollback: String::new(),
+            size: (30, 120),
+        })
+    }
+
+    fn send_line(&mut self, line: &str) -> Result<()> {
+        self.writer.write_all(line.as_bytes())?;
+        self.writer.write_all(b"\r\n")?;
+        self.writer.flush()?;
+        Ok(())
+    }
+
+    fn interrupt(&mut self) -> Result<()> {
+        self.writer.write_all(&[3])?;
+        self.writer.flush()?;
+        Ok(())
+    }
+
+    fn stop(&mut self) -> Result<()> {
+        self.child.kill()?;
+        Ok(())
+    }
+
+    fn resize(&mut self, rows: u16, cols: u16) -> Result<()> {
+        if self.size == (rows, cols) {
+            return Ok(());
+        }
+        self.master.resize(PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        })?;
+        self.size = (rows, cols);
+        Ok(())
+    }
+
+    fn drain(&mut self) -> bool {
+        let mut changed = false;
+        for chunk in self.output.try_iter() {
+            self.scrollback
+                .push_str(&strip_terminal_sequences(&String::from_utf8_lossy(&chunk)));
+            changed = true;
+        }
+        if self.scrollback.len() > MAX_PTY_SCROLLBACK {
+            let target = self.scrollback.len() - MAX_PTY_SCROLLBACK;
+            let boundary = self
+                .scrollback
+                .char_indices()
+                .find_map(|(index, _)| (index >= target).then_some(index))
+                .unwrap_or(self.scrollback.len());
+            self.scrollback.drain(..boundary);
+        }
+        changed
+    }
+}
+
+impl Drop for PtySession {
+    fn drop(&mut self) {
+        let _result = self.child.kill();
+    }
+}
 
 impl TuiCommandHandler {
+    pub(super) fn poll_shell(&mut self) -> Option<CommandResponse> {
+        let session = self.shell_session.as_mut()?;
+        let changed = session.drain();
+        let exited = session.child.try_wait().ok().flatten().is_some();
+        if exited {
+            let content = text_view("Shell session ended", session.scrollback.clone());
+            self.shell_session = None;
+            return Some(CommandResponse {
+                message: "Shell session ended".into(),
+                content: Some(content),
+                input_mode: Some(InputMode::LoreMesh),
+            });
+        }
+        changed.then(|| CommandResponse {
+            message: String::new(),
+            content: Some(text_view("Interactive shell", session.scrollback.clone())),
+            input_mode: Some(InputMode::Shell),
+        })
+    }
+
+    pub(super) fn resize_shell(&mut self, rows: u16, cols: u16) {
+        if let Some(session) = &mut self.shell_session {
+            let _result = session.resize(rows.max(1), cols.max(1));
+        }
+    }
+
     pub(super) fn demo_command(&self, kind: DemoKind) -> (String, Option<ViewContent>) {
         let content = match kind {
             DemoKind::Table => ViewContent {
@@ -57,9 +192,9 @@ impl TuiCommandHandler {
                 d2: None,
             },
             DemoKind::Shell => ViewContent {
-                title: "Demo: local shell boundary".into(),
+                title: "Demo: interactive local shell".into(),
                 paragraphs: vec![format!(
-                    "status: {}\nmode: non-interactive\ntime limit: 10 seconds\noutput limit: 64 KiB per stream\nhistory: command text not retained\n\nTry:\n/shell enable\n/shell run pwd\n/shell disable",
+                    "status: {}\nmode: persistent PTY\nscrollback limit: 256 KiB\nhistory: command text not retained by LoreMesh\n\nTry:\n/shell\n# then type normal shell commands\n/exit",
                     if self.shell_enabled { "enabled" } else { "disabled" }
                 )],
                 table: None,
@@ -225,6 +360,20 @@ impl TuiCommandHandler {
         command: &ShellCommand,
     ) -> Result<(String, Option<ViewContent>)> {
         match command {
+            ShellCommand::Enter => {
+                if self.shell_session.is_none() {
+                    self.shell_session = Some(PtySession::start(&self.root)?);
+                }
+                self.shell_enabled = true;
+                self.pending_input_mode = Some(InputMode::Shell);
+                Ok((
+                    "Interactive shell started; /exit or Ctrl-D returns to LoreMesh".into(),
+                    Some(text_view(
+                        "Interactive shell",
+                        "Starting the workspace shell…".into(),
+                    )),
+                ))
+            }
             ShellCommand::Status => {
                 let message = format!(
                     "Local shell is {}",
@@ -268,6 +417,35 @@ impl TuiCommandHandler {
                         }
                     ),
                     Some(text_view("Untrusted local shell output", result.output)),
+                ))
+            }
+            ShellCommand::Input(input) => {
+                self.shell_session
+                    .as_mut()
+                    .context("interactive shell is not running")?
+                    .send_line(input)?;
+                self.pending_input_mode = Some(InputMode::Shell);
+                Ok((String::new(), None))
+            }
+            ShellCommand::Interrupt => {
+                self.shell_session
+                    .as_mut()
+                    .context("interactive shell is not running")?
+                    .interrupt()?;
+                self.pending_input_mode = Some(InputMode::Shell);
+                Ok(("Sent Ctrl-C".into(), None))
+            }
+            ShellCommand::Exit => {
+                if let Some(mut session) = self.shell_session.take() {
+                    session.stop()?;
+                }
+                self.pending_input_mode = Some(InputMode::LoreMesh);
+                Ok((
+                    "Returned to LoreMesh".into(),
+                    Some(text_view(
+                        "Shell session closed",
+                        "The interactive shell was terminated.".into(),
+                    )),
                 ))
             }
         }
@@ -441,6 +619,35 @@ fn drain_bounded(mut reader: impl Read, limit: usize) -> Result<(Vec<u8>, bool)>
     Ok((retained, truncated))
 }
 
+fn strip_terminal_sequences(value: &str) -> String {
+    let mut result = String::new();
+    let mut characters = value.chars().peekable();
+    while let Some(character) = characters.next() {
+        if character == '\x1b' {
+            if characters.next_if_eq(&'[').is_some() {
+                for sequence in characters.by_ref() {
+                    if ('@'..='~').contains(&sequence) {
+                        break;
+                    }
+                }
+            } else if characters.next_if_eq(&']').is_some() {
+                let mut previous_escape = false;
+                for sequence in characters.by_ref() {
+                    if sequence == '\u{7}' || (previous_escape && sequence == '\\') {
+                        break;
+                    }
+                    previous_escape = sequence == '\x1b';
+                }
+            }
+        } else if matches!(character, '\r' | '\u{8}') {
+            // A text timeline cannot apply carriage returns or destructive backspaces.
+        } else if character == '\n' || character == '\t' || !character.is_control() {
+            result.push(character);
+        }
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -554,5 +761,33 @@ mod tests {
             run_local_shell("echo hello", temporary.path()).expect("local deterministic command");
         assert!(result.output.starts_with("stdout:"));
         assert!(result.output.contains("hello"));
+    }
+
+    #[test]
+    fn terminal_sequences_are_removed_from_shell_output() {
+        assert_eq!(
+            strip_terminal_sequences("\x1b[31mred\x1b[0m\r\n\x1b]0;private-title\u{7}prompt"),
+            "red\nprompt"
+        );
+    }
+
+    #[test]
+    fn interactive_pty_accepts_input_and_streams_output() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let mut session = PtySession::start(temporary.path()).expect("start PTY shell");
+        session
+            .send_line("echo loremesh_pty_ready")
+            .expect("send shell input");
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while Instant::now() < deadline && !session.scrollback.contains("loremesh_pty_ready") {
+            session.drain();
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            session.scrollback.contains("loremesh_pty_ready"),
+            "PTY output did not contain the marker: {}",
+            session.scrollback
+        );
+        session.stop().expect("stop PTY shell");
     }
 }

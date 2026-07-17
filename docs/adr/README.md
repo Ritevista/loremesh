@@ -12,3 +12,4 @@ ADRs are immutable decision history. Statuses are Proposed, Accepted, Superseded
 | 0006 | Dual license | Accepted |
 | 0007 | Reusable workbench shell inside the monolith | Accepted |
 | 0008 | Explicit local tool execution boundary | Accepted |
+| 0009 | Persistent PTY-backed local shell | Accepted |

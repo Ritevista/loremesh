@@ -18,6 +18,7 @@ loremesh-core = { version = "0.1.0", path = "../loremesh-core" }
 loremesh-report = { version = "0.1.0", path = "../loremesh-report" }
 loremesh-storage = { version = "0.1.0", path = "../loremesh-storage" }
 loremesh-tui = { version = "0.1.0", path = "../loremesh-tui" }
+portable-pty.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 

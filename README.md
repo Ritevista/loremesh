@@ -36,7 +36,7 @@ Workbench data and source commands are also available:
 /browse src
 /open README.md
 /search lineage
-/shell status
+/shell
 ```
 
 Every completed command returns focus to the upper investigation timeline. `/help`
@@ -44,10 +44,12 @@ opens the full multiline command reference there. Use `/demo table`, `/demo char
 `/demo markdown`, `/demo code`, or `/demo shell` to preview capabilities without
 creating input files or executing a command.
 
-Local shell execution is disabled on every startup. `/shell enable` enables it only
-for the current TUI session; commands have the user's operating-system permissions
-and may access files or networks. Output is bounded, marked untrusted, and is not
-automatically saved or treated as evidence.
+`/shell` starts a persistent local shell in the workspace and keeps the bottom
+composer focused. Type commands normally; their output streams into the scrollable
+investigation timeline. Use Ctrl-C to interrupt, and `/exit` or Ctrl-D to return to
+LoreMesh command mode. `/quit` exits the application. The shell has the user's
+operating-system permissions and may access files or networks. Scrollback is bounded,
+is not automatically saved, and is never treated as evidence.
 
 ## Principles
 

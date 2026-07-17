@@ -272,10 +272,20 @@ pub enum TableCommand {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ShellCommand {
+    Enter,
     Status,
     Enable,
     Disable,
     Run(String),
+    Input(String),
+    Interrupt,
+    Exit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputMode {
+    LoreMesh,
+    Shell,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -482,6 +492,7 @@ fn parse_chart<'a>(mut parts: impl Iterator<Item = &'a str>) -> Result<SlashComm
 
 fn parse_shell<'a>(mut parts: impl Iterator<Item = &'a str>) -> Result<SlashCommand, CommandError> {
     match parts.next() {
+        None => Ok(SlashCommand::Shell(ShellCommand::Enter)),
         Some("status") => no_args(parts, SlashCommand::Shell(ShellCommand::Status)),
         Some("enable") => no_args(parts, SlashCommand::Shell(ShellCommand::Enable)),
         Some("disable") => no_args(parts, SlashCommand::Shell(ShellCommand::Disable)),
@@ -551,11 +562,18 @@ fn parse_save<'a>(mut parts: impl Iterator<Item = &'a str>) -> Result<SlashComma
 pub struct CommandResponse {
     pub message: String,
     pub content: Option<ViewContent>,
+    pub input_mode: Option<InputMode>,
 }
 
 /// Application boundary for commands that require services or filesystem I/O.
 pub trait CommandHandler {
     fn execute(&mut self, command: &SlashCommand, active: &ViewContent) -> CommandResponse;
+
+    fn poll(&mut self) -> Option<CommandResponse> {
+        None
+    }
+
+    fn resize(&mut self, _rows: u16, _cols: u16) {}
 }
 
 /// Pure interactive shell state.
@@ -570,6 +588,7 @@ pub struct ShellState {
     should_quit: bool,
     custom: Option<ViewContent>,
     timeline_scroll: u16,
+    input_mode: InputMode,
 }
 
 impl Default for ShellState {
@@ -586,6 +605,7 @@ impl Default for ShellState {
             should_quit: false,
             custom: None,
             timeline_scroll: 0,
+            input_mode: InputMode::LoreMesh,
         }
     }
 }
@@ -603,6 +623,23 @@ impl ShellState {
         handler: &mut H,
     ) {
         match key.code {
+            KeyCode::Char('c')
+                if self.input_mode == InputMode::Shell
+                    && key.modifiers.contains(KeyModifiers::CONTROL) =>
+            {
+                self.apply_response(handler.execute(
+                    &SlashCommand::Shell(ShellCommand::Interrupt),
+                    self.content(view),
+                ));
+            }
+            KeyCode::Char('d')
+                if self.input_mode == InputMode::Shell
+                    && key.modifiers.contains(KeyModifiers::CONTROL) =>
+            {
+                self.apply_response(
+                    handler.execute(&SlashCommand::Shell(ShellCommand::Exit), self.content(view)),
+                );
+            }
             KeyCode::BackTab => self.focus = self.focus.previous(),
             KeyCode::Tab if key.modifiers.contains(KeyModifiers::SHIFT) => {
                 self.focus = self.focus.previous();
@@ -656,6 +693,20 @@ impl ShellState {
         if input.is_empty() {
             return;
         }
+        if self.input_mode == InputMode::Shell {
+            if input == "/quit" {
+                self.should_quit = true;
+                return;
+            }
+            let command = if input == "/exit" {
+                ShellCommand::Exit
+            } else {
+                ShellCommand::Input(input)
+            };
+            let response = handler.execute(&SlashCommand::Shell(command), self.content(view));
+            self.apply_response(response);
+            return;
+        }
         let parsed = parse_command(&input);
         if !matches!(&parsed, Ok(SlashCommand::Shell(ShellCommand::Run(_)))) {
             self.history.push_back(input);
@@ -681,16 +732,35 @@ impl ShellState {
             Ok(SlashCommand::Quit) => self.should_quit = true,
             Ok(command) => {
                 let response = handler.execute(&command, self.content(view));
-                self.push_message(response.message);
-                self.focus = Focus::Timeline;
-                if let Some(content) = response.content {
-                    self.show_content(content);
-                }
+                self.apply_response(response);
             }
             Err(error) => {
                 let message = error.to_string();
                 self.show_content(text_content("Command error", &message));
                 self.push_message(message);
+            }
+        }
+    }
+
+    fn apply_response(&mut self, response: CommandResponse) {
+        if !response.message.is_empty() {
+            self.push_message(response.message);
+        }
+        if let Some(mode) = response.input_mode {
+            self.input_mode = mode;
+        }
+        self.focus = if self.input_mode == InputMode::Shell {
+            Focus::Input
+        } else {
+            Focus::Timeline
+        };
+        if let Some(content) = response.content {
+            if self.input_mode == InputMode::Shell {
+                self.custom = Some(content);
+                self.active = ViewKind::Custom;
+                self.focus = Focus::Input;
+            } else {
+                self.show_content(content);
             }
         }
     }
@@ -775,7 +845,7 @@ fn text_content(title: &str, text: &str) -> ViewContent {
 fn help_content() -> ViewContent {
     text_content(
         "LoreMesh command reference",
-        "LOREMESH COMMAND REFERENCE\n\nNAVIGATION\n/help\n  Show this complete reference.\n/artifacts\n  Show imported artifacts.\n/findings\n  Show findings.\n/trace\n  Show evidence lineage.\n\nDEMONSTRATIONS\n/demo table\n/demo chart\n/demo markdown\n/demo code\n/demo shell\n  Open deterministic capability previews; no files, network, model, or shell execution required.\n\nTABLES\n/table load <workspace-relative.csv>\n/table refresh\n/table save <workspace-relative.csv>\n/table sort <column> <asc|desc>\n/table filter <column> <text>\n/table search <text>\n/table columns <column,...>\n/table reset\n\nCHARTS\n/chart <bar|hbar|line|pie> <label-column> <value-column>\n  Requires a loaded table. Example: /chart hbar name duration\n\nFILES AND MARKDOWN\n/browse [workspace-relative-directory]\n/open <workspace-relative-file>\n/search <text>\n\nLOCAL SHELL\n/shell status\n/shell enable\n/shell run <command>\n/shell disable\n  Shell execution is non-interactive, disabled at startup, limited to 10 seconds, and has your OS permissions. Command text is not retained in history.\n\nREPORTS\n/save current --format <md|markdown-mermaid|markdown-d2|csv|html|png> [--output <path>]\n/export current --format <format> [--output <path>]\n\nSERVICES\n/services\n/model\n/context\n/compact\n/clear\n\nEXIT\n/quit\n/exit\n  Outside input, q exits. Esc always returns focus to the timeline and never exits.",
+        "LOREMESH COMMAND REFERENCE\n\nNAVIGATION\n/help\n  Show this complete reference.\n/artifacts\n  Show imported artifacts.\n/findings\n  Show findings.\n/trace\n  Show evidence lineage.\n\nDEMONSTRATIONS\n/demo table\n/demo chart\n/demo markdown\n/demo code\n/demo shell\n  Open deterministic capability previews; no files, network, model, or shell execution required.\n\nTABLES\n/table load <workspace-relative.csv>\n/table refresh\n/table save <workspace-relative.csv>\n/table sort <column> <asc|desc>\n/table filter <column> <text>\n/table search <text>\n/table columns <column,...>\n/table reset\n\nCHARTS\n/chart <bar|hbar|line|pie> <label-column> <value-column>\n  Requires a loaded table. Example: /chart hbar name duration\n\nFILES AND MARKDOWN\n/browse [workspace-relative-directory]\n/open <workspace-relative-file>\n/search <text>\n\nLOCAL SHELL\n/shell\n  Start a persistent shell in the workspace. Type commands normally in the bottom composer.\n/exit or Ctrl-D\n  Close the shell and return to LoreMesh command mode.\nCtrl-C\n  Interrupt the current shell command. PgUp/PgDn and Home/End scroll its bounded timeline output.\n  The shell has your OS permissions and may access files or networks. LoreMesh does not retain its command history.\n\nREPORTS\n/save current --format <md|markdown-mermaid|markdown-d2|csv|html|png> [--output <path>]\n/export current --format <format> [--output <path>]\n\nSERVICES\n/services\n/model\n/context\n/compact\n/clear\n\nEXIT\n/quit\n/exit\n  Outside input, q exits. In shell mode /exit returns to LoreMesh and /quit exits the app. Esc changes focus and never exits.",
     )
 }
 
@@ -801,7 +871,14 @@ fn event_loop<H: CommandHandler>(
     handler: &mut H,
 ) -> Result<(), TuiError> {
     while !state.should_quit() {
-        terminal.draw(|frame| draw(frame, view, state))?;
+        while let Some(response) = handler.poll() {
+            state.apply_response(response);
+        }
+        terminal.draw(|frame| {
+            let area = frame.area();
+            handler.resize(area.height.saturating_sub(7), area.width);
+            draw(frame, view, state);
+        })?;
         if event::poll(Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
                 state.handle_key(key, view, handler);
@@ -868,9 +945,24 @@ fn draw(frame: &mut ratatui::Frame<'_>, view: &DashboardView, state: &ShellState
         Style::default().fg(Color::Gray)
     };
     frame.render_widget(
-        Paragraph::new(format!("> {}", state.input))
-            .style(input_style)
-            .block(focus_block("Command", state.focus == Focus::Input)),
+        Paragraph::new(format!(
+            "{} {}",
+            if state.input_mode == InputMode::Shell {
+                "$"
+            } else {
+                ">"
+            },
+            state.input
+        ))
+        .style(input_style)
+        .block(focus_block(
+            if state.input_mode == InputMode::Shell {
+                "Shell"
+            } else {
+                "Command"
+            },
+            state.focus == Focus::Input,
+        )),
         rows[2],
     );
     let latest = state.messages.back().map_or("ready", String::as_str);
@@ -946,6 +1038,7 @@ mod tests {
             CommandResponse {
                 message: format!("handled {command:?}"),
                 content: None,
+                input_mode: None,
             }
         }
     }
@@ -998,6 +1091,10 @@ mod tests {
             Ok(SlashCommand::Shell(ShellCommand::Run("echo hello".into())))
         );
         assert_eq!(
+            parse_command("/shell"),
+            Ok(SlashCommand::Shell(ShellCommand::Enter))
+        );
+        assert_eq!(
             parse_command("/demo markdown"),
             Ok(SlashCommand::Demo(DemoKind::Markdown))
         );
@@ -1015,7 +1112,7 @@ mod tests {
         assert_eq!(state.focus, Focus::Timeline);
         assert!(content.paragraphs[0].contains("TABLES\n/table load"));
         assert!(content.paragraphs[0].contains("/demo shell"));
-        assert!(content.paragraphs[0].contains("/shell run <command>"));
+        assert!(content.paragraphs[0].contains("Start a persistent shell"));
     }
 
     #[test]
@@ -1070,6 +1167,55 @@ mod tests {
         };
         state.submit(&view(), &mut Handler);
         assert!(state.history.is_empty());
+    }
+
+    #[test]
+    fn interactive_shell_routes_bare_input_and_exit_to_the_handler() {
+        #[derive(Default)]
+        struct ShellHandler {
+            commands: Vec<SlashCommand>,
+        }
+        impl CommandHandler for ShellHandler {
+            fn execute(&mut self, command: &SlashCommand, _: &ViewContent) -> CommandResponse {
+                self.commands.push(command.clone());
+                let input_mode = match command {
+                    SlashCommand::Shell(ShellCommand::Enter) => Some(InputMode::Shell),
+                    SlashCommand::Shell(ShellCommand::Exit) => Some(InputMode::LoreMesh),
+                    _ => None,
+                };
+                CommandResponse {
+                    message: String::new(),
+                    content: None,
+                    input_mode,
+                }
+            }
+        }
+
+        let view = view();
+        let mut state = ShellState {
+            focus: Focus::Input,
+            input: "/shell".into(),
+            ..ShellState::default()
+        };
+        let mut handler = ShellHandler::default();
+        state.submit(&view, &mut handler);
+        assert_eq!(state.input_mode, InputMode::Shell);
+        assert_eq!(state.focus, Focus::Input);
+
+        state.input = "echo hello".into();
+        state.submit(&view, &mut handler);
+        state.input = "/exit".into();
+        state.submit(&view, &mut handler);
+
+        assert_eq!(
+            handler.commands,
+            vec![
+                SlashCommand::Shell(ShellCommand::Enter),
+                SlashCommand::Shell(ShellCommand::Input("echo hello".into())),
+                SlashCommand::Shell(ShellCommand::Exit),
+            ]
+        );
+        assert_eq!(state.input_mode, InputMode::LoreMesh);
     }
 
     #[test]
