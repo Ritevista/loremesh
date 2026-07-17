@@ -38,6 +38,11 @@ Workbench data and source commands are also available:
 /shell status
 ```
 
+Every completed command returns focus to the upper investigation timeline. `/help`
+opens the full multiline command reference there. Use `/demo table`, `/demo chart`,
+`/demo markdown`, `/demo code`, or `/demo shell` to preview capabilities without
+creating input files or executing a command.
+
 Local shell execution is disabled on every startup. `/shell enable` enables it only
 for the current TUI session; commands have the user's operating-system permissions
 and may access files or networks. Output is bounded, marked untrusted, and is not
