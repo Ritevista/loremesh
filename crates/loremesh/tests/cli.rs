@@ -106,3 +106,58 @@ fn export_rejects_traversal() {
         .join("leak.json")
         .exists());
 }
+
+#[test]
+fn corpus_import_index_search_drop_and_rebuild_are_offline() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let workspace = temporary.path().join("workspace");
+    let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join("tests/fixtures/knowledge-base/corpus.json");
+    Command::cargo_bin("loremesh")
+        .expect("binary")
+        .args(["workspace", "init"])
+        .arg(&workspace)
+        .assert()
+        .success();
+    Command::cargo_bin("loremesh")
+        .expect("binary")
+        .current_dir(&workspace)
+        .args(["corpus", "import"])
+        .arg(&manifest)
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("Documents imported:")
+                .and(predicate::str::contains("52"))
+                .and(predicate::str::contains("broken_relationship")),
+        );
+    Command::cargo_bin("loremesh")
+        .expect("binary")
+        .current_dir(&workspace)
+        .args(["index", "build", "knowledge"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("50 document(s)"));
+    Command::cargo_bin("loremesh")
+        .expect("binary")
+        .current_dir(&workspace)
+        .args(["index", "search", "bounded retry"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Adaptive Retry Study"));
+    Command::cargo_bin("loremesh")
+        .expect("binary")
+        .current_dir(&workspace)
+        .args(["index", "drop", "knowledge"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("canonical knowledge is unchanged"));
+    Command::cargo_bin("loremesh")
+        .expect("binary")
+        .current_dir(&workspace)
+        .args(["workspace", "status"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Artifacts: 52"));
+}

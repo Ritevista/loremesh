@@ -7,13 +7,14 @@ use std::path::{Component, Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
+use loremesh_core::index::{LexicalIndex, SearchQuery};
 use loremesh_core::{
     ArtifactReference, Claim, ClaimId, EdgeOrigin, EvidenceReference, Finding, FindingId,
     KnowledgeScope, ReportId, Trace, TraceEdge, TraceEdgeId, TraceId, TraceNode, TraceNodeId,
     TraceNodeKind, VerificationStatus,
 };
 use loremesh_report::{Metric, Report, ReportBlock, ReportSection, TableModel};
-use loremesh_storage::LocalRepository;
+use loremesh_storage::{CorpusImportLimits, CorpusImportResult, LocalRepository, TantivyIndex};
 use loremesh_tui::grid::DataGrid;
 use loremesh_tui::{
     CommandHandler, CommandResponse, InputMode, SaveFormat, SlashCommand, ViewContent,
@@ -44,6 +45,14 @@ enum Command {
         #[command(subcommand)]
         command: ArtifactCommand,
     },
+    Corpus {
+        #[command(subcommand)]
+        command: CorpusCommand,
+    },
+    Index {
+        #[command(subcommand)]
+        command: IndexCommand,
+    },
     Demo {
         #[command(subcommand)]
         command: DemoCommand,
@@ -70,6 +79,33 @@ enum WorkspaceCommand {
 enum ArtifactCommand {
     /// Import one UTF-8 Markdown file.
     Import { file: PathBuf },
+}
+
+#[derive(Debug, Subcommand)]
+enum CorpusCommand {
+    /// Import a local schema-versioned corpus manifest without network access.
+    Import { manifest: PathBuf },
+}
+
+#[derive(Debug, Subcommand)]
+enum IndexCommand {
+    /// Build or replace the disposable knowledge index from canonical artifacts.
+    Build { kind: IndexKind },
+    /// Display disposable index lifecycle state.
+    Status,
+    /// Search the local knowledge index.
+    Search {
+        query: String,
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+    },
+    /// Delete only a disposable index.
+    Drop { kind: IndexKind },
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum IndexKind {
+    Knowledge,
 }
 
 #[derive(Debug, Subcommand)]
@@ -155,6 +191,8 @@ fn run() -> Result<()> {
                 }
             );
         }
+        Command::Corpus { command } => run_corpus(command)?,
+        Command::Index { command } => run_index(command)?,
         Command::Demo {
             command: DemoCommand::Seed,
         } => seed_demo(&current_root()?)?,
@@ -186,6 +224,124 @@ fn run() -> Result<()> {
             println!("Workspace is healthy");
         }
     }
+    Ok(())
+}
+
+fn run_corpus(command: CorpusCommand) -> Result<()> {
+    match command {
+        CorpusCommand::Import { manifest } => {
+            let mut repository = open_current()?;
+            let imported = repository
+                .import_corpus_manifest(&manifest, CorpusImportLimits::default())
+                .with_context(|| {
+                    format!("could not import corpus manifest {}", manifest.display())
+                })?;
+            print_corpus_import(&imported)
+        }
+    }
+}
+
+fn run_index(command: IndexCommand) -> Result<()> {
+    let root = current_root()?;
+    let repository = LocalRepository::open(&root)?;
+    let mut index = TantivyIndex::knowledge_for_workspace(&root);
+    match command {
+        IndexCommand::Build {
+            kind: IndexKind::Knowledge,
+        } => {
+            let result = index.rebuild(repository.index_documents()?)?;
+            println!("Knowledge index ready: {} document(s)", result.indexed);
+        }
+        IndexCommand::Status => {
+            let canonical = repository.summary()?;
+            let status = index.status()?;
+            println!(
+                "Knowledge index: {:?}\nSchema: {}\nIndexed documents: {}\nCanonical artifacts: {}",
+                status.state, status.schema_version, status.documents, canonical.artifacts
+            );
+        }
+        IndexCommand::Search { query, limit } => {
+            for hit in index.search(&SearchQuery::new(query, limit)?)? {
+                println!("{}\t{}\t{:.3}", hit.artifact_id, hit.title, hit.score);
+            }
+        }
+        IndexCommand::Drop {
+            kind: IndexKind::Knowledge,
+        } => {
+            index.drop_index()?;
+            println!("Dropped disposable knowledge index; canonical knowledge is unchanged");
+        }
+    }
+    Ok(())
+}
+
+fn print_corpus_import(imported: &CorpusImportResult) -> Result<()> {
+    let diagnostics = TableModel::new(
+        "Diagnostics",
+        vec![
+            "Severity".into(),
+            "Code".into(),
+            "Subject".into(),
+            "Message".into(),
+        ],
+        imported
+            .diagnostics
+            .iter()
+            .map(|diagnostic| {
+                vec![
+                    format!("{:?}", diagnostic.severity),
+                    diagnostic.code.clone(),
+                    diagnostic.subject.clone(),
+                    diagnostic.message.clone(),
+                ]
+            })
+            .collect(),
+    )?;
+    let report = Report::new(
+        ReportId::deterministic(format!("corpus-import:{}", imported.corpus_name)),
+        format!("Corpus import: {}", imported.corpus_name),
+        vec![
+            ReportSection::new(
+                "Imported",
+                vec![
+                    ReportBlock::Metric(Metric::new(
+                        "Documents discovered",
+                        imported.documents_discovered.to_string(),
+                        None,
+                    )?),
+                    ReportBlock::Metric(Metric::new(
+                        "Documents imported",
+                        imported.documents_imported.to_string(),
+                        None,
+                    )?),
+                    ReportBlock::Metric(Metric::new(
+                        "Snapshots created",
+                        imported.snapshots_created.to_string(),
+                        None,
+                    )?),
+                    ReportBlock::Metric(Metric::new(
+                        "Unchanged sources",
+                        imported.unchanged_sources.to_string(),
+                        None,
+                    )?),
+                    ReportBlock::Metric(Metric::new("Images", imported.images.to_string(), None)?),
+                    ReportBlock::Metric(Metric::new("Issues", imported.issues.to_string(), None)?),
+                    ReportBlock::Metric(Metric::new(
+                        "Code references",
+                        imported.code_references.to_string(),
+                        None,
+                    )?),
+                    ReportBlock::Metric(Metric::new(
+                        "Relationships",
+                        imported.relationships.to_string(),
+                        None,
+                    )?),
+                ],
+            )?,
+            ReportSection::new("Problems", vec![ReportBlock::Table(diagnostics)])?,
+        ],
+    )?;
+    print!("{}", loremesh_report::render_markdown(&report));
     Ok(())
 }
 

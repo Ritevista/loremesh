@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "codes": [
+    "duplicate_identity",
+    "missing_file",
+    "broken_relationship"
+  ]
+}
+

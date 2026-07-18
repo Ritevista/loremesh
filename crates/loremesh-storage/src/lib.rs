@@ -12,6 +12,12 @@ use rusqlite::{params, Connection, OptionalExtension};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+mod corpus;
+mod lexical;
+
+pub use corpus::{CorpusDiagnostic, CorpusImportLimits, CorpusImportResult, DiagnosticSeverity};
+pub use lexical::TantivyIndex;
+
 const METADATA_DIR: &str = ".loremesh";
 const DATABASE_FILE: &str = "loremesh.db";
 const OBJECTS_DIR: &str = "objects";
@@ -114,6 +120,7 @@ impl LocalRepository {
         let connection = Connection::open(database)
             .map_err(|source| db("opening workspace database", source))?;
         configure(&connection)?;
+        migrate(&connection)?;
         validate_schema(&connection)?;
         Ok(Self {
             root: root.to_path_buf(),
@@ -212,6 +219,14 @@ impl LocalRepository {
 
     /// Reads and digest-verifies an artifact's immutable content.
     pub fn artifact_content(&self, artifact: &Artifact) -> Result<String, StorageError> {
+        let bytes = self.artifact_bytes(artifact)?;
+        String::from_utf8(bytes).map_err(|_| {
+            StorageError::Validation(format!("artifact {} is not valid UTF-8", artifact.id))
+        })
+    }
+
+    /// Reads and digest-verifies an artifact's immutable bytes.
+    pub fn artifact_bytes(&self, artifact: &Artifact) -> Result<Vec<u8>, StorageError> {
         let digest: String = self
             .connection
             .query_row(
@@ -228,16 +243,16 @@ impl LocalRepository {
                 artifact.id
             )));
         }
-        String::from_utf8(bytes).map_err(|_| {
-            StorageError::Validation(format!("artifact {} is not valid UTF-8", artifact.id))
-        })
+        Ok(bytes)
     }
 
     /// Lists artifacts in stable identifier order.
     pub fn artifacts(&self) -> Result<Vec<Artifact>, StorageError> {
         let mut statement = self
             .connection
-            .prepare("SELECT id, snapshot_id, name, byte_len FROM artifacts ORDER BY id")
+            .prepare(
+                "SELECT id, snapshot_id, name, media_type, byte_len FROM artifacts ORDER BY id",
+            )
             .map_err(|source| db("preparing artifact query", source))?;
         let rows = statement
             .query_map([], |row| {
@@ -245,17 +260,19 @@ impl LocalRepository {
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
-                    row.get::<_, u64>(3)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, u64>(4)?,
                 ))
             })
             .map_err(|source| db("querying artifacts", source))?;
         rows.map(|row| {
-            let (id, snapshot, name, len) =
+            let (id, snapshot, name, media_type, len) =
                 row.map_err(|source| db("reading artifact row", source))?;
-            Artifact::new(
+            Artifact::with_media_type(
                 ArtifactId::parse(id)?,
                 SnapshotId::parse(snapshot)?,
                 name,
+                media_type,
                 len,
             )
             .map_err(StorageError::from)
@@ -354,7 +371,7 @@ fn configure(connection: &Connection) -> Result<(), StorageError> {
         .map_err(|source| db("configuring database", source))
 }
 fn migrate(connection: &Connection) -> Result<(), StorageError> {
-    connection.execute_batch("BEGIN; CREATE TABLE IF NOT EXISTS schema_info (version INTEGER NOT NULL); INSERT INTO schema_info(version) SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM schema_info); CREATE TABLE IF NOT EXISTS workspace (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), id TEXT NOT NULL UNIQUE, name TEXT NOT NULL); CREATE TABLE IF NOT EXISTS sources (id TEXT PRIMARY KEY, location TEXT NOT NULL UNIQUE); CREATE TABLE IF NOT EXISTS snapshots (id TEXT PRIMARY KEY, source_id TEXT NOT NULL REFERENCES sources(id), digest TEXT NOT NULL, byte_len INTEGER NOT NULL, UNIQUE(source_id, digest)); CREATE TABLE IF NOT EXISTS artifacts (id TEXT PRIMARY KEY, snapshot_id TEXT NOT NULL REFERENCES snapshots(id), name TEXT NOT NULL, media_type TEXT NOT NULL, byte_len INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS findings (id TEXT PRIMARY KEY, body TEXT NOT NULL); CREATE TABLE IF NOT EXISTS traces (id TEXT PRIMARY KEY, finding_id TEXT NOT NULL UNIQUE REFERENCES findings(id), body TEXT NOT NULL); COMMIT;").map_err(|source| db("creating schema", source))
+    connection.execute_batch("BEGIN; CREATE TABLE IF NOT EXISTS schema_info (version INTEGER NOT NULL); INSERT INTO schema_info(version) SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM schema_info); CREATE TABLE IF NOT EXISTS workspace (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), id TEXT NOT NULL UNIQUE, name TEXT NOT NULL); CREATE TABLE IF NOT EXISTS sources (id TEXT PRIMARY KEY, location TEXT NOT NULL UNIQUE); CREATE TABLE IF NOT EXISTS snapshots (id TEXT PRIMARY KEY, source_id TEXT NOT NULL REFERENCES sources(id), digest TEXT NOT NULL, byte_len INTEGER NOT NULL, UNIQUE(source_id, digest)); CREATE TABLE IF NOT EXISTS artifacts (id TEXT PRIMARY KEY, snapshot_id TEXT NOT NULL REFERENCES snapshots(id), name TEXT NOT NULL, media_type TEXT NOT NULL, byte_len INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS findings (id TEXT PRIMARY KEY, body TEXT NOT NULL); CREATE TABLE IF NOT EXISTS traces (id TEXT PRIMARY KEY, finding_id TEXT NOT NULL UNIQUE REFERENCES findings(id), body TEXT NOT NULL); CREATE TABLE IF NOT EXISTS current_snapshots (source_id TEXT PRIMARY KEY REFERENCES sources(id), snapshot_id TEXT NOT NULL REFERENCES snapshots(id)); CREATE TABLE IF NOT EXISTS relationships (id TEXT PRIMARY KEY, body TEXT NOT NULL); CREATE TABLE IF NOT EXISTS feedback (id TEXT PRIMARY KEY, relationship_id TEXT, body TEXT NOT NULL); CREATE TABLE IF NOT EXISTS code_references (id TEXT PRIMARY KEY, body TEXT NOT NULL); CREATE TABLE IF NOT EXISTS corpus_imports (name TEXT NOT NULL, version TEXT NOT NULL, body TEXT NOT NULL, PRIMARY KEY(name, version)); UPDATE schema_info SET version = 2; COMMIT;").map_err(|source| db("creating schema", source))
 }
 fn validate_schema(connection: &Connection) -> Result<(), StorageError> {
     let version: i64 = connection
@@ -362,7 +379,7 @@ fn validate_schema(connection: &Connection) -> Result<(), StorageError> {
             row.get(0)
         })
         .map_err(|source| db("reading schema version", source))?;
-    if version == 1 {
+    if version == 2 {
         Ok(())
     } else {
         Err(StorageError::Configuration(format!(

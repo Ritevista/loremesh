@@ -1,0 +1,1218 @@
+{
+  "schema_version": 1,
+  "name": "loremesh-synthetic-knowledge-base",
+  "version": "1",
+  "sources": [
+    {
+      "id": "docs",
+      "kind": "local_fixture",
+      "origin": "corpus",
+      "revision": "fixture-v1"
+    },
+    {
+      "id": "issues",
+      "kind": "issue_export",
+      "origin": "issues",
+      "revision": "fixture-v1"
+    },
+    {
+      "id": "code",
+      "kind": "git",
+      "origin": "sample-service",
+      "revision": "1111111111111111111111111111111111111111"
+    },
+    {
+      "id": "images",
+      "kind": "local_fixture",
+      "origin": "images",
+      "revision": "fixture-v1"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "doc-adaptive-retry",
+      "source": "docs",
+      "path": "corpus/feature-studies/adaptive-retry.md",
+      "title": "Adaptive Retry Study",
+      "document_type": "feature_study",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "engineering"
+      ]
+    },
+    {
+      "id": "doc-safe-rollout",
+      "source": "docs",
+      "path": "corpus/feature-studies/safe-rollout.md",
+      "title": "Safe Rollout Study",
+      "document_type": "feature_study",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "engineering"
+      ]
+    },
+    {
+      "id": "doc-audit-stream",
+      "source": "docs",
+      "path": "corpus/feature-studies/audit-stream.md",
+      "title": "Audit Stream Study",
+      "document_type": "feature_study",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "engineering"
+      ]
+    },
+    {
+      "id": "doc-config-validation",
+      "source": "docs",
+      "path": "corpus/feature-studies/config-validation.md",
+      "title": "Configuration Validation Study",
+      "document_type": "feature_study",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "engineering"
+      ]
+    },
+    {
+      "id": "doc-relay-api",
+      "source": "docs",
+      "path": "corpus/interface-specs/relay-api.md",
+      "title": "Relay Interface",
+      "document_type": "interface_specification",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "engineering"
+      ]
+    },
+    {
+      "id": "doc-health-api",
+      "source": "docs",
+      "path": "corpus/interface-specs/health-api.md",
+      "title": "Health Interface",
+      "document_type": "interface_specification",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "engineering"
+      ]
+    },
+    {
+      "id": "doc-event-schema",
+      "source": "docs",
+      "path": "corpus/interface-specs/event-schema.md",
+      "title": "Event Schema",
+      "document_type": "interface_specification",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "engineering"
+      ]
+    },
+    {
+      "id": "doc-config-schema",
+      "source": "docs",
+      "path": "corpus/interface-specs/config-schema.md",
+      "title": "Configuration Schema",
+      "document_type": "interface_specification",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "engineering"
+      ]
+    },
+    {
+      "id": "doc-storage-boundary",
+      "source": "docs",
+      "path": "corpus/architecture/storage-boundary.md",
+      "title": "Storage Boundary",
+      "document_type": "architecture_decision",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "engineering"
+      ]
+    },
+    {
+      "id": "doc-processing-lineage",
+      "source": "docs",
+      "path": "corpus/architecture/processing-lineage.md",
+      "title": "Processing Lineage",
+      "document_type": "architecture_decision",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "engineering"
+      ]
+    },
+    {
+      "id": "doc-failure-isolation",
+      "source": "docs",
+      "path": "corpus/architecture/failure-isolation.md",
+      "title": "Failure Isolation",
+      "document_type": "architecture_decision",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "engineering"
+      ]
+    },
+    {
+      "id": "doc-component-map",
+      "source": "docs",
+      "path": "corpus/architecture/component-map.md",
+      "title": "Component Map",
+      "document_type": "architecture_decision",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "engineering"
+      ]
+    },
+    {
+      "id": "doc-operator-guide",
+      "source": "docs",
+      "path": "corpus/product-docs/operator-guide.md",
+      "title": "Operator Guide",
+      "document_type": "operational_procedure",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "engineering"
+      ]
+    },
+    {
+      "id": "doc-troubleshooting",
+      "source": "docs",
+      "path": "corpus/product-docs/troubleshooting.md",
+      "title": "Troubleshooting Guide",
+      "document_type": "troubleshooting_guide",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "engineering"
+      ]
+    },
+    {
+      "id": "doc-security-analysis",
+      "source": "docs",
+      "path": "corpus/product-docs/security-analysis.md",
+      "title": "Security Analysis",
+      "document_type": "security_analysis",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "engineering"
+      ]
+    },
+    {
+      "id": "doc-performance-study",
+      "source": "docs",
+      "path": "corpus/product-docs/performance-study.md",
+      "title": "Performance Study",
+      "document_type": "performance_study",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "engineering"
+      ]
+    },
+    {
+      "id": "doc-deployment-guide",
+      "source": "docs",
+      "path": "corpus/product-docs/deployment-guide.md",
+      "title": "Deployment Guide",
+      "document_type": "deployment_guide",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "engineering"
+      ]
+    },
+    {
+      "id": "doc-release-note",
+      "source": "docs",
+      "path": "corpus/product-docs/release-note.md",
+      "title": "Release Note",
+      "document_type": "release_note",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "engineering"
+      ]
+    },
+    {
+      "id": "doc-code-spec",
+      "source": "docs",
+      "path": "corpus/product-docs/code-spec.md",
+      "title": "Code Specification",
+      "document_type": "code_specification",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "engineering"
+      ]
+    },
+    {
+      "id": "doc-ownership-guide",
+      "source": "docs",
+      "path": "corpus/product-docs/ownership-guide.md",
+      "title": "Ownership Guide",
+      "document_type": "operational_procedure",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "engineering"
+      ]
+    },
+    {
+      "id": "issue-001",
+      "source": "issues",
+      "path": "issues/issue-001.md",
+      "title": "Synthetic issue 001",
+      "document_type": "issue",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "issue"
+      ]
+    },
+    {
+      "id": "issue-002",
+      "source": "issues",
+      "path": "issues/issue-002.md",
+      "title": "Synthetic issue 002",
+      "document_type": "issue",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "issue"
+      ]
+    },
+    {
+      "id": "issue-003",
+      "source": "issues",
+      "path": "issues/issue-003.md",
+      "title": "Synthetic issue 003",
+      "document_type": "issue",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "issue"
+      ]
+    },
+    {
+      "id": "issue-004",
+      "source": "issues",
+      "path": "issues/issue-004.md",
+      "title": "Synthetic issue 004",
+      "document_type": "issue",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "issue"
+      ]
+    },
+    {
+      "id": "issue-005",
+      "source": "issues",
+      "path": "issues/issue-005.md",
+      "title": "Synthetic issue 005",
+      "document_type": "issue",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "issue"
+      ]
+    },
+    {
+      "id": "issue-006",
+      "source": "issues",
+      "path": "issues/issue-006.md",
+      "title": "Synthetic issue 006",
+      "document_type": "issue",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "issue"
+      ]
+    },
+    {
+      "id": "issue-007",
+      "source": "issues",
+      "path": "issues/issue-007.md",
+      "title": "Synthetic issue 007",
+      "document_type": "issue",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "issue"
+      ]
+    },
+    {
+      "id": "issue-008",
+      "source": "issues",
+      "path": "issues/issue-008.md",
+      "title": "Synthetic issue 008",
+      "document_type": "issue",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "issue"
+      ]
+    },
+    {
+      "id": "issue-009",
+      "source": "issues",
+      "path": "issues/issue-009.md",
+      "title": "Synthetic issue 009",
+      "document_type": "issue",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "issue"
+      ]
+    },
+    {
+      "id": "issue-010",
+      "source": "issues",
+      "path": "issues/issue-010.md",
+      "title": "Synthetic issue 010",
+      "document_type": "issue",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "issue"
+      ]
+    },
+    {
+      "id": "issue-011",
+      "source": "issues",
+      "path": "issues/issue-011.md",
+      "title": "Synthetic issue 011",
+      "document_type": "issue",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "issue"
+      ]
+    },
+    {
+      "id": "issue-012",
+      "source": "issues",
+      "path": "issues/issue-012.md",
+      "title": "Synthetic issue 012",
+      "document_type": "issue",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "issue"
+      ]
+    },
+    {
+      "id": "issue-013",
+      "source": "issues",
+      "path": "issues/issue-013.md",
+      "title": "Synthetic issue 013",
+      "document_type": "issue",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "issue"
+      ]
+    },
+    {
+      "id": "issue-014",
+      "source": "issues",
+      "path": "issues/issue-014.md",
+      "title": "Synthetic issue 014",
+      "document_type": "issue",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "issue"
+      ]
+    },
+    {
+      "id": "issue-015",
+      "source": "issues",
+      "path": "issues/issue-015.md",
+      "title": "Synthetic issue 015",
+      "document_type": "issue",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "issue"
+      ]
+    },
+    {
+      "id": "issue-016",
+      "source": "issues",
+      "path": "issues/issue-016.md",
+      "title": "Synthetic issue 016",
+      "document_type": "issue",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "issue"
+      ]
+    },
+    {
+      "id": "issue-017",
+      "source": "issues",
+      "path": "issues/issue-017.md",
+      "title": "Synthetic issue 017",
+      "document_type": "issue",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "issue"
+      ]
+    },
+    {
+      "id": "issue-018",
+      "source": "issues",
+      "path": "issues/issue-018.md",
+      "title": "Synthetic issue 018",
+      "document_type": "issue",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "issue"
+      ]
+    },
+    {
+      "id": "issue-019",
+      "source": "issues",
+      "path": "issues/issue-019.md",
+      "title": "Synthetic issue 019",
+      "document_type": "issue",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "issue"
+      ]
+    },
+    {
+      "id": "issue-020",
+      "source": "issues",
+      "path": "issues/issue-020.md",
+      "title": "Synthetic issue 020",
+      "document_type": "issue",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "issue"
+      ]
+    },
+    {
+      "id": "issue-021",
+      "source": "issues",
+      "path": "issues/issue-021.md",
+      "title": "Synthetic issue 021",
+      "document_type": "issue",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "issue"
+      ]
+    },
+    {
+      "id": "issue-022",
+      "source": "issues",
+      "path": "issues/issue-022.md",
+      "title": "Synthetic issue 022",
+      "document_type": "issue",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "issue"
+      ]
+    },
+    {
+      "id": "issue-023",
+      "source": "issues",
+      "path": "issues/issue-023.md",
+      "title": "Synthetic issue 023",
+      "document_type": "issue",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "issue"
+      ]
+    },
+    {
+      "id": "issue-024",
+      "source": "issues",
+      "path": "issues/issue-024.md",
+      "title": "Synthetic issue 024",
+      "document_type": "issue",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "issue"
+      ]
+    },
+    {
+      "id": "issue-025",
+      "source": "issues",
+      "path": "issues/issue-025.md",
+      "title": "Synthetic issue 025",
+      "document_type": "issue",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "issue"
+      ]
+    },
+    {
+      "id": "issue-026",
+      "source": "issues",
+      "path": "issues/issue-026.md",
+      "title": "Synthetic issue 026",
+      "document_type": "issue",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "issue"
+      ]
+    },
+    {
+      "id": "issue-027",
+      "source": "issues",
+      "path": "issues/issue-027.md",
+      "title": "Synthetic issue 027",
+      "document_type": "issue",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "issue"
+      ]
+    },
+    {
+      "id": "issue-028",
+      "source": "issues",
+      "path": "issues/issue-028.md",
+      "title": "Synthetic issue 028",
+      "document_type": "issue",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "issue"
+      ]
+    },
+    {
+      "id": "issue-029",
+      "source": "issues",
+      "path": "issues/issue-029.md",
+      "title": "Synthetic issue 029",
+      "document_type": "issue",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "issue"
+      ]
+    },
+    {
+      "id": "issue-030",
+      "source": "issues",
+      "path": "issues/issue-030.md",
+      "title": "Synthetic issue 030",
+      "document_type": "issue",
+      "media_type": "text/markdown",
+      "tags": [
+        "synthetic",
+        "issue"
+      ]
+    },
+    {
+      "id": "image-system-map",
+      "source": "images",
+      "path": "corpus/images/system-map.svg",
+      "title": "Synthetic system map",
+      "document_type": "image",
+      "media_type": "image/svg+xml",
+      "tags": [
+        "synthetic"
+      ]
+    },
+    {
+      "id": "image-flow",
+      "source": "images",
+      "path": "corpus/images/flow.svg",
+      "title": "Synthetic flow",
+      "document_type": "image",
+      "media_type": "image/svg+xml",
+      "tags": [
+        "synthetic"
+      ]
+    },
+    {
+      "id": "missing-guide",
+      "source": "docs",
+      "path": "corpus/product-docs/missing-guide.md",
+      "title": "Deliberately missing guide",
+      "document_type": "troubleshooting_guide",
+      "media_type": "text/markdown",
+      "tags": [
+        "expected-missing"
+      ]
+    },
+    {
+      "id": "duplicate-logical",
+      "source": "docs",
+      "path": "corpus/product-docs/operator-guide.md",
+      "title": "Duplicate candidate one",
+      "document_type": "operational_procedure",
+      "media_type": "text/markdown",
+      "tags": [
+        "expected-duplicate"
+      ]
+    },
+    {
+      "id": "duplicate-logical",
+      "source": "docs",
+      "path": "corpus/product-docs/operator-guide.md",
+      "title": "Duplicate candidate two",
+      "document_type": "operational_procedure",
+      "media_type": "text/markdown",
+      "tags": [
+        "expected-duplicate"
+      ]
+    }
+  ],
+  "code_references": [
+    {
+      "id": "code-01",
+      "repository": "fictional/sample-service",
+      "revision": "1111111111111111111111111111111111111111",
+      "path": "src/retry.rs",
+      "symbol": "calculate_delay",
+      "line_start": 1,
+      "line_end": 80
+    },
+    {
+      "id": "code-02",
+      "repository": "fictional/sample-service",
+      "revision": "1111111111111111111111111111111111111111",
+      "path": "src/rollout.rs",
+      "symbol": null,
+      "line_start": 1,
+      "line_end": 80
+    },
+    {
+      "id": "code-03",
+      "repository": "fictional/sample-service",
+      "revision": "1111111111111111111111111111111111111111",
+      "path": "src/audit.rs",
+      "symbol": null,
+      "line_start": 1,
+      "line_end": 80
+    },
+    {
+      "id": "code-04",
+      "repository": "fictional/sample-service",
+      "revision": "1111111111111111111111111111111111111111",
+      "path": "src/config.rs",
+      "symbol": null,
+      "line_start": 1,
+      "line_end": 80
+    },
+    {
+      "id": "code-05",
+      "repository": "fictional/sample-service",
+      "revision": "1111111111111111111111111111111111111111",
+      "path": "src/lib.rs",
+      "symbol": null,
+      "line_start": 1,
+      "line_end": 80
+    },
+    {
+      "id": "code-06",
+      "repository": "fictional/sample-service",
+      "revision": "1111111111111111111111111111111111111111",
+      "path": "src/lib.rs",
+      "symbol": null,
+      "line_start": 1,
+      "line_end": 80
+    },
+    {
+      "id": "code-07",
+      "repository": "fictional/sample-service",
+      "revision": "1111111111111111111111111111111111111111",
+      "path": "src/audit.rs",
+      "symbol": null,
+      "line_start": 1,
+      "line_end": 80
+    },
+    {
+      "id": "code-08",
+      "repository": "fictional/sample-service",
+      "revision": "1111111111111111111111111111111111111111",
+      "path": "src/config.rs",
+      "symbol": null,
+      "line_start": 1,
+      "line_end": 80
+    },
+    {
+      "id": "code-09",
+      "repository": "fictional/sample-service",
+      "revision": "1111111111111111111111111111111111111111",
+      "path": "src/lib.rs",
+      "symbol": null,
+      "line_start": 1,
+      "line_end": 80
+    },
+    {
+      "id": "code-10",
+      "repository": "fictional/sample-service",
+      "revision": "1111111111111111111111111111111111111111",
+      "path": "src/audit.rs",
+      "symbol": null,
+      "line_start": 1,
+      "line_end": 80
+    },
+    {
+      "id": "code-11",
+      "repository": "fictional/sample-service",
+      "revision": "1111111111111111111111111111111111111111",
+      "path": "src/lib.rs",
+      "symbol": null,
+      "line_start": 1,
+      "line_end": 80
+    },
+    {
+      "id": "code-12",
+      "repository": "fictional/sample-service",
+      "revision": "1111111111111111111111111111111111111111",
+      "path": "src/lib.rs",
+      "symbol": null,
+      "line_start": 1,
+      "line_end": 80
+    },
+    {
+      "id": "code-13",
+      "repository": "fictional/sample-service",
+      "revision": "1111111111111111111111111111111111111111",
+      "path": "src/rollout.rs",
+      "symbol": null,
+      "line_start": 1,
+      "line_end": 80
+    },
+    {
+      "id": "code-14",
+      "repository": "fictional/sample-service",
+      "revision": "1111111111111111111111111111111111111111",
+      "path": "src/audit.rs",
+      "symbol": null,
+      "line_start": 1,
+      "line_end": 80
+    },
+    {
+      "id": "code-15",
+      "repository": "fictional/sample-service",
+      "revision": "1111111111111111111111111111111111111111",
+      "path": "src/config.rs",
+      "symbol": null,
+      "line_start": 1,
+      "line_end": 80
+    }
+  ],
+  "relationships": [
+    {
+      "source": "artifact:doc-adaptive-retry",
+      "relation": "tracked_by",
+      "target": "artifact:issue-001",
+      "origin": "deterministic",
+      "verification": "verified",
+      "external_analysis": null,
+      "external_id": null
+    },
+    {
+      "source": "artifact:doc-safe-rollout",
+      "relation": "tracked_by",
+      "target": "artifact:issue-002",
+      "origin": "deterministic",
+      "verification": "verified",
+      "external_analysis": null,
+      "external_id": null
+    },
+    {
+      "source": "artifact:doc-audit-stream",
+      "relation": "tracked_by",
+      "target": "artifact:issue-003",
+      "origin": "deterministic",
+      "verification": "verified",
+      "external_analysis": null,
+      "external_id": null
+    },
+    {
+      "source": "artifact:doc-config-validation",
+      "relation": "tracked_by",
+      "target": "artifact:issue-004",
+      "origin": "deterministic",
+      "verification": "verified",
+      "external_analysis": null,
+      "external_id": null
+    },
+    {
+      "source": "artifact:doc-relay-api",
+      "relation": "tracked_by",
+      "target": "artifact:issue-005",
+      "origin": "deterministic",
+      "verification": "verified",
+      "external_analysis": null,
+      "external_id": null
+    },
+    {
+      "source": "artifact:doc-health-api",
+      "relation": "tracked_by",
+      "target": "artifact:issue-006",
+      "origin": "deterministic",
+      "verification": "verified",
+      "external_analysis": null,
+      "external_id": null
+    },
+    {
+      "source": "artifact:doc-event-schema",
+      "relation": "tracked_by",
+      "target": "artifact:issue-007",
+      "origin": "deterministic",
+      "verification": "verified",
+      "external_analysis": null,
+      "external_id": null
+    },
+    {
+      "source": "artifact:doc-config-schema",
+      "relation": "tracked_by",
+      "target": "artifact:issue-008",
+      "origin": "deterministic",
+      "verification": "verified",
+      "external_analysis": null,
+      "external_id": null
+    },
+    {
+      "source": "artifact:doc-storage-boundary",
+      "relation": "tracked_by",
+      "target": "artifact:issue-009",
+      "origin": "deterministic",
+      "verification": "verified",
+      "external_analysis": null,
+      "external_id": null
+    },
+    {
+      "source": "artifact:doc-processing-lineage",
+      "relation": "tracked_by",
+      "target": "artifact:issue-010",
+      "origin": "deterministic",
+      "verification": "verified",
+      "external_analysis": null,
+      "external_id": null
+    },
+    {
+      "source": "artifact:doc-adaptive-retry",
+      "relation": "implemented_by",
+      "target": "code:code-01",
+      "origin": "manual",
+      "verification": "verified",
+      "external_analysis": null,
+      "external_id": null
+    },
+    {
+      "source": "artifact:doc-safe-rollout",
+      "relation": "implemented_by",
+      "target": "code:code-02",
+      "origin": "manual",
+      "verification": "verified",
+      "external_analysis": null,
+      "external_id": null
+    },
+    {
+      "source": "artifact:doc-audit-stream",
+      "relation": "implemented_by",
+      "target": "code:code-03",
+      "origin": "manual",
+      "verification": "verified",
+      "external_analysis": null,
+      "external_id": null
+    },
+    {
+      "source": "artifact:doc-config-validation",
+      "relation": "implemented_by",
+      "target": "code:code-04",
+      "origin": "manual",
+      "verification": "verified",
+      "external_analysis": null,
+      "external_id": null
+    },
+    {
+      "source": "artifact:doc-relay-api",
+      "relation": "implemented_by",
+      "target": "code:code-05",
+      "origin": "manual",
+      "verification": "verified",
+      "external_analysis": null,
+      "external_id": null
+    },
+    {
+      "source": "artifact:doc-health-api",
+      "relation": "implemented_by",
+      "target": "code:code-06",
+      "origin": "manual",
+      "verification": "verified",
+      "external_analysis": null,
+      "external_id": null
+    },
+    {
+      "source": "artifact:doc-event-schema",
+      "relation": "implemented_by",
+      "target": "code:code-07",
+      "origin": "manual",
+      "verification": "verified",
+      "external_analysis": null,
+      "external_id": null
+    },
+    {
+      "source": "artifact:doc-config-schema",
+      "relation": "implemented_by",
+      "target": "code:code-08",
+      "origin": "manual",
+      "verification": "verified",
+      "external_analysis": null,
+      "external_id": null
+    },
+    {
+      "source": "artifact:doc-storage-boundary",
+      "relation": "implemented_by",
+      "target": "code:code-09",
+      "origin": "manual",
+      "verification": "verified",
+      "external_analysis": null,
+      "external_id": null
+    },
+    {
+      "source": "artifact:doc-processing-lineage",
+      "relation": "implemented_by",
+      "target": "code:code-10",
+      "origin": "manual",
+      "verification": "verified",
+      "external_analysis": null,
+      "external_id": null
+    },
+    {
+      "source": "artifact:doc-adaptive-retry",
+      "relation": "related_to",
+      "target": "artifact:missing-target",
+      "origin": "inferred",
+      "verification": "unreviewed",
+      "external_analysis": "fixture-analysis",
+      "external_id": "candidate-broken"
+    },
+    {
+      "source": "artifact:doc-safe-rollout",
+      "relation": "depends_on",
+      "target": "artifact:doc-health-api",
+      "origin": "extracted",
+      "verification": "unreviewed",
+      "external_analysis": "fixture-analysis",
+      "external_id": "candidate-7"
+    }
+  ],
+  "expected_relationships": [
+    {
+      "source": "artifact:doc-adaptive-retry",
+      "relation": "tracked_by",
+      "target": "artifact:issue-001",
+      "origin": "deterministic",
+      "verification": "verified",
+      "external_analysis": null,
+      "external_id": null
+    },
+    {
+      "source": "artifact:doc-safe-rollout",
+      "relation": "tracked_by",
+      "target": "artifact:issue-002",
+      "origin": "deterministic",
+      "verification": "verified",
+      "external_analysis": null,
+      "external_id": null
+    },
+    {
+      "source": "artifact:doc-audit-stream",
+      "relation": "tracked_by",
+      "target": "artifact:issue-003",
+      "origin": "deterministic",
+      "verification": "verified",
+      "external_analysis": null,
+      "external_id": null
+    },
+    {
+      "source": "artifact:doc-config-validation",
+      "relation": "tracked_by",
+      "target": "artifact:issue-004",
+      "origin": "deterministic",
+      "verification": "verified",
+      "external_analysis": null,
+      "external_id": null
+    },
+    {
+      "source": "artifact:doc-relay-api",
+      "relation": "tracked_by",
+      "target": "artifact:issue-005",
+      "origin": "deterministic",
+      "verification": "verified",
+      "external_analysis": null,
+      "external_id": null
+    },
+    {
+      "source": "artifact:doc-health-api",
+      "relation": "tracked_by",
+      "target": "artifact:issue-006",
+      "origin": "deterministic",
+      "verification": "verified",
+      "external_analysis": null,
+      "external_id": null
+    },
+    {
+      "source": "artifact:doc-event-schema",
+      "relation": "tracked_by",
+      "target": "artifact:issue-007",
+      "origin": "deterministic",
+      "verification": "verified",
+      "external_analysis": null,
+      "external_id": null
+    },
+    {
+      "source": "artifact:doc-config-schema",
+      "relation": "tracked_by",
+      "target": "artifact:issue-008",
+      "origin": "deterministic",
+      "verification": "verified",
+      "external_analysis": null,
+      "external_id": null
+    },
+    {
+      "source": "artifact:doc-storage-boundary",
+      "relation": "tracked_by",
+      "target": "artifact:issue-009",
+      "origin": "deterministic",
+      "verification": "verified",
+      "external_analysis": null,
+      "external_id": null
+    },
+    {
+      "source": "artifact:doc-processing-lineage",
+      "relation": "tracked_by",
+      "target": "artifact:issue-010",
+      "origin": "deterministic",
+      "verification": "verified",
+      "external_analysis": null,
+      "external_id": null
+    },
+    {
+      "source": "artifact:doc-adaptive-retry",
+      "relation": "implemented_by",
+      "target": "code:code-01",
+      "origin": "manual",
+      "verification": "verified",
+      "external_analysis": null,
+      "external_id": null
+    },
+    {
+      "source": "artifact:doc-safe-rollout",
+      "relation": "implemented_by",
+      "target": "code:code-02",
+      "origin": "manual",
+      "verification": "verified",
+      "external_analysis": null,
+      "external_id": null
+    },
+    {
+      "source": "artifact:doc-audit-stream",
+      "relation": "implemented_by",
+      "target": "code:code-03",
+      "origin": "manual",
+      "verification": "verified",
+      "external_analysis": null,
+      "external_id": null
+    },
+    {
+      "source": "artifact:doc-config-validation",
+      "relation": "implemented_by",
+      "target": "code:code-04",
+      "origin": "manual",
+      "verification": "verified",
+      "external_analysis": null,
+      "external_id": null
+    },
+    {
+      "source": "artifact:doc-relay-api",
+      "relation": "implemented_by",
+      "target": "code:code-05",
+      "origin": "manual",
+      "verification": "verified",
+      "external_analysis": null,
+      "external_id": null
+    },
+    {
+      "source": "artifact:doc-health-api",
+      "relation": "implemented_by",
+      "target": "code:code-06",
+      "origin": "manual",
+      "verification": "verified",
+      "external_analysis": null,
+      "external_id": null
+    },
+    {
+      "source": "artifact:doc-event-schema",
+      "relation": "implemented_by",
+      "target": "code:code-07",
+      "origin": "manual",
+      "verification": "verified",
+      "external_analysis": null,
+      "external_id": null
+    },
+    {
+      "source": "artifact:doc-config-schema",
+      "relation": "implemented_by",
+      "target": "code:code-08",
+      "origin": "manual",
+      "verification": "verified",
+      "external_analysis": null,
+      "external_id": null
+    },
+    {
+      "source": "artifact:doc-storage-boundary",
+      "relation": "implemented_by",
+      "target": "code:code-09",
+      "origin": "manual",
+      "verification": "verified",
+      "external_analysis": null,
+      "external_id": null
+    },
+    {
+      "source": "artifact:doc-processing-lineage",
+      "relation": "implemented_by",
+      "target": "code:code-10",
+      "origin": "manual",
+      "verification": "verified",
+      "external_analysis": null,
+      "external_id": null
+    }
+  ],
+  "external_analyses": [
+    {
+      "id": "fixture-analysis",
+      "provider": "fixture-analyzer",
+      "provider_version": "1.0.0",
+      "run_id": "fixture-run-1",
+      "configuration_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "observed_at": "2026-01-01T00:00:00Z"
+    }
+  ]
+}
+
