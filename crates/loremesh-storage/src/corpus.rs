@@ -17,10 +17,9 @@ use sha2::{Digest, Sha256};
 
 use crate::{db, io, ser, LocalRepository, StorageError, METADATA_DIR, OBJECTS_DIR};
 
-const MAX_MANIFEST_BYTES: u64 = 2 * 1024 * 1024;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CorpusImportLimits {
+    pub max_manifest_bytes: u64,
     pub max_artifacts: usize,
     pub max_artifact_bytes: u64,
     pub max_total_bytes: u64,
@@ -29,9 +28,23 @@ pub struct CorpusImportLimits {
 impl Default for CorpusImportLimits {
     fn default() -> Self {
         Self {
+            max_manifest_bytes: 2 * 1024 * 1024,
             max_artifacts: 10_000,
             max_artifact_bytes: 16 * 1024 * 1024,
             max_total_bytes: 512 * 1024 * 1024,
+        }
+    }
+}
+
+impl CorpusImportLimits {
+    /// Bounded limits for explicitly requested, local scale-corpus imports.
+    #[must_use]
+    pub const fn large_local() -> Self {
+        Self {
+            max_manifest_bytes: 256 * 1024 * 1024,
+            max_artifacts: 100_000,
+            max_artifact_bytes: 64 * 1024 * 1024,
+            max_total_bytes: 3 * 1024 * 1024 * 1024,
         }
     }
 }
@@ -642,9 +655,10 @@ fn load_manifest(
             "corpus manifest must be a regular non-symlink file".into(),
         ));
     }
-    if metadata.len() > MAX_MANIFEST_BYTES {
+    if metadata.len() > limits.max_manifest_bytes {
         return Err(StorageError::Validation(format!(
-            "corpus manifest exceeds {MAX_MANIFEST_BYTES} bytes"
+            "corpus manifest exceeds {} bytes; use --allow-large only for trusted local scale corpora",
+            limits.max_manifest_bytes
         )));
     }
     let bytes = fs::read(manifest_path).map_err(|source| io("reading corpus manifest", source))?;

@@ -84,7 +84,12 @@ enum ArtifactCommand {
 #[derive(Debug, Subcommand)]
 enum CorpusCommand {
     /// Import a local schema-versioned corpus manifest without network access.
-    Import { manifest: PathBuf },
+    Import {
+        manifest: PathBuf,
+        /// Opt in to bounded limits suitable for the provided local 100 MB–2 GB scale corpora.
+        #[arg(long)]
+        allow_large: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -229,10 +234,18 @@ fn run() -> Result<()> {
 
 fn run_corpus(command: CorpusCommand) -> Result<()> {
     match command {
-        CorpusCommand::Import { manifest } => {
+        CorpusCommand::Import {
+            manifest,
+            allow_large,
+        } => {
             let mut repository = open_current()?;
+            let limits = if allow_large {
+                CorpusImportLimits::large_local()
+            } else {
+                CorpusImportLimits::default()
+            };
             let imported = repository
-                .import_corpus_manifest(&manifest, CorpusImportLimits::default())
+                .import_corpus_manifest(&manifest, limits)
                 .with_context(|| {
                     format!("could not import corpus manifest {}", manifest.display())
                 })?;

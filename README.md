@@ -29,6 +29,14 @@ cd target/test-corpora/fixture-workspace
 
 `just corpus-public-verify` validates the pinned Kubernetes profile without network access. `just corpus-public` is the explicit network-enabled build and writes only below `target/test-corpora/`. Scale recipes `just corpus-scale-100m`, `corpus-scale-500m`, `corpus-scale-1g`, and `corpus-scale-2g` require the underlying large-output acknowledgement and never run in CI.
 
+Import a generated scale corpus from an initialized workspace with the matching explicit opt-in:
+
+```console
+cargo run -p loremesh -- corpus import --allow-large ../scale-100m/corpus.json
+```
+
+Large import mode remains bounded and performs no network access or imported-code execution.
+
 Inside the TUI, press `/` to enter a command, `Tab` or `Shift-Tab` to move focus,
 Page Up/Down or Home/End to scroll results, and `q`, `/quit`, or `/exit` to leave.
 `Esc` safely returns to the timeline and never exits the application. Use `/help` for the command list.

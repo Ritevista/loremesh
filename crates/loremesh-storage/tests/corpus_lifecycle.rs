@@ -64,6 +64,34 @@ fn fixture_import_reports_health_and_is_idempotent() {
 }
 
 #[test]
+fn large_local_limits_explicitly_admit_scale_sized_manifests() {
+    let corpus = tempfile::tempdir().expect("corpus copy");
+    copy_tree(&fixture(), corpus.path());
+    let manifest = corpus.path().join("corpus.json");
+    let mut bytes = fs::read(&manifest).expect("read manifest");
+    bytes.resize(2 * 1024 * 1024 + 1, b' ');
+    fs::write(&manifest, bytes).expect("pad manifest");
+
+    let default_workspace = tempfile::tempdir().expect("default workspace");
+    LocalRepository::initialize(default_workspace.path()).expect("initialize default");
+    let mut default_repository =
+        LocalRepository::open(default_workspace.path()).expect("open default");
+    assert!(default_repository
+        .import_corpus_manifest(&manifest, CorpusImportLimits::default())
+        .expect_err("default limit must reject padded manifest")
+        .to_string()
+        .contains("use --allow-large"));
+
+    let large_workspace = tempfile::tempdir().expect("large workspace");
+    LocalRepository::initialize(large_workspace.path()).expect("initialize large");
+    let mut large_repository = LocalRepository::open(large_workspace.path()).expect("open large");
+    let imported = large_repository
+        .import_corpus_manifest(&manifest, CorpusImportLimits::large_local())
+        .expect("large local import");
+    assert_eq!(imported.documents_imported, 52);
+}
+
+#[test]
 fn changed_source_preserves_old_snapshot_and_marks_old_artifact_stale() {
     let corpus = tempfile::tempdir().expect("corpus copy");
     copy_tree(&fixture(), corpus.path());
