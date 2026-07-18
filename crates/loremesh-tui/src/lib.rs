@@ -56,36 +56,6 @@ pub struct ViewContent {
     pub d2: Option<String>,
 }
 
-impl ViewContent {
-    fn detail_text(&self) -> String {
-        let mut text = self.paragraphs.join("\n\n");
-        if let Some(table) = &self.table {
-            if !text.is_empty() {
-                text.push_str("\n\n");
-            }
-            let _ = write!(
-                text,
-                "{} rows · {} columns",
-                table.rows.len(),
-                table.columns.len()
-            );
-        }
-        if let Some(chart) = &self.chart {
-            if !text.is_empty() {
-                text.push_str("\n\n");
-            }
-            let _ = write!(
-                text,
-                "{:?} chart · {} series · {} points",
-                chart.kind,
-                chart.series.len(),
-                chart.series.first().map_or(0, |series| series.values.len())
-            );
-        }
-        text
-    }
-}
-
 /// Pure presentation data projected from `LoreMesh` domain state.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DashboardView {
@@ -247,25 +217,25 @@ impl DashboardView {
 /// Focusable shell region.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Focus {
+    Primary,
     Timeline,
-    Context,
     Input,
 }
 
 impl Focus {
     fn next(self) -> Self {
         match self {
-            Self::Timeline => Self::Context,
-            Self::Context => Self::Input,
-            Self::Input => Self::Timeline,
+            Self::Primary => Self::Timeline,
+            Self::Timeline => Self::Input,
+            Self::Input => Self::Primary,
         }
     }
 
     fn previous(self) -> Self {
         match self {
-            Self::Timeline => Self::Input,
-            Self::Context => Self::Timeline,
-            Self::Input => Self::Context,
+            Self::Primary => Self::Input,
+            Self::Timeline => Self::Primary,
+            Self::Input => Self::Timeline,
         }
     }
 }
@@ -609,14 +579,16 @@ pub struct ShellState {
     history_cursor: Option<usize>,
     should_quit: bool,
     custom: Option<ViewContent>,
+    primary_scroll: u16,
     timeline_scroll: u16,
+    selected_row: usize,
     input_mode: InputMode,
 }
 
 impl Default for ShellState {
     fn default() -> Self {
         Self {
-            focus: Focus::Timeline,
+            focus: Focus::Primary,
             input: String::new(),
             active: ViewKind::Summary,
             messages: VecDeque::from([String::from(
@@ -626,7 +598,9 @@ impl Default for ShellState {
             history_cursor: None,
             should_quit: false,
             custom: None,
+            primary_scroll: 0,
             timeline_scroll: 0,
+            selected_row: 0,
             input_mode: InputMode::LoreMesh,
         }
     }
@@ -674,24 +648,57 @@ impl ShellState {
             KeyCode::Char('q') if self.focus != Focus::Input => self.should_quit = true,
             KeyCode::Esc if self.focus == Focus::Input => {
                 self.input.clear();
-                self.focus = Focus::Timeline;
+                self.focus = Focus::Primary;
                 self.history_cursor = None;
             }
-            KeyCode::Esc => self.focus = Focus::Timeline,
+            KeyCode::Esc => self.focus = Focus::Primary,
             KeyCode::PageUp => {
-                self.focus = Focus::Timeline;
-                self.timeline_scroll = self.timeline_scroll.saturating_sub(10);
+                self.scroll_focused(-10, view);
             }
             KeyCode::PageDown => {
-                self.focus = Focus::Timeline;
-                self.timeline_scroll = self
-                    .timeline_scroll
-                    .saturating_add(10)
-                    .min(self.maximum_scroll(view));
+                self.scroll_focused(10, view);
             }
-            KeyCode::Home if self.focus != Focus::Input => self.timeline_scroll = 0,
+            KeyCode::Home if self.focus == Focus::Primary => {
+                self.primary_scroll = 0;
+                self.selected_row = 0;
+            }
+            KeyCode::Home if self.focus == Focus::Timeline => self.timeline_scroll = 0,
             KeyCode::End if self.focus != Focus::Input => {
-                self.timeline_scroll = self.maximum_scroll(view);
+                if self.focus == Focus::Primary {
+                    self.primary_scroll = self.maximum_primary_scroll(view);
+                    self.selected_row = self.table_last_row(view);
+                } else {
+                    self.timeline_scroll = self.maximum_timeline_scroll();
+                }
+            }
+            KeyCode::Up if self.focus == Focus::Primary && self.content(view).table.is_some() => {
+                self.selected_row = self.selected_row.saturating_sub(1);
+                let selected = u16::try_from(self.selected_row).unwrap_or(u16::MAX);
+                if selected < self.primary_scroll {
+                    self.primary_scroll = selected;
+                }
+            }
+            KeyCode::Down if self.focus == Focus::Primary && self.content(view).table.is_some() => {
+                self.selected_row = self
+                    .selected_row
+                    .saturating_add(1)
+                    .min(self.table_last_row(view));
+                let selected = u16::try_from(self.selected_row).unwrap_or(u16::MAX);
+                if selected >= self.primary_scroll.saturating_add(10) {
+                    self.primary_scroll = selected.saturating_sub(9);
+                }
+            }
+            KeyCode::Enter
+                if self.focus == Focus::Primary && self.content(view).table.is_some() =>
+            {
+                self.push_message(format!(
+                    "Selected table row {}",
+                    self.selected_row.saturating_add(1)
+                ));
+            }
+            KeyCode::Char('e') if self.focus == Focus::Primary => {
+                self.focus = Focus::Input;
+                self.input = "/save current --format ".into();
             }
             KeyCode::Enter if self.focus == Focus::Input => self.submit(view, handler),
             KeyCode::Backspace if self.focus == Focus::Input => {
@@ -743,13 +750,14 @@ impl ShellState {
             }
             Ok(SlashCommand::View(kind)) => {
                 self.active = kind;
-                self.focus = Focus::Timeline;
-                self.timeline_scroll = 0;
+                self.focus = Focus::Primary;
+                self.primary_scroll = 0;
+                self.selected_row = 0;
                 self.push_message(format!("Opened {}", view.content(kind).title));
             }
             Ok(SlashCommand::Clear) => {
                 self.messages.clear();
-                self.focus = Focus::Timeline;
+                self.focus = Focus::Primary;
             }
             Ok(SlashCommand::Quit) => self.should_quit = true,
             Ok(command) => {
@@ -774,7 +782,7 @@ impl ShellState {
         self.focus = if self.input_mode == InputMode::Shell {
             Focus::Input
         } else {
-            Focus::Timeline
+            Focus::Primary
         };
         if let Some(content) = response.content {
             if self.input_mode == InputMode::Shell {
@@ -790,11 +798,12 @@ impl ShellState {
     fn show_content(&mut self, content: ViewContent) {
         self.custom = Some(content);
         self.active = ViewKind::Custom;
-        self.focus = Focus::Timeline;
-        self.timeline_scroll = 0;
+        self.focus = Focus::Primary;
+        self.primary_scroll = 0;
+        self.selected_row = 0;
     }
 
-    fn maximum_scroll(&self, view: &DashboardView) -> u16 {
+    fn maximum_primary_scroll(&self, view: &DashboardView) -> u16 {
         let content = self.content(view);
         let lines = content.table.as_ref().map_or_else(
             || {
@@ -808,6 +817,35 @@ impl ShellState {
             |table| table.rows.len(),
         );
         u16::try_from(lines.saturating_sub(1)).map_or(u16::MAX, std::convert::identity)
+    }
+
+    fn maximum_timeline_scroll(&self) -> u16 {
+        u16::try_from(self.messages.len().saturating_sub(1)).unwrap_or(u16::MAX)
+    }
+
+    fn table_last_row(&self, view: &DashboardView) -> usize {
+        self.content(view)
+            .table
+            .as_ref()
+            .map_or(0, |table| table.rows.len().saturating_sub(1))
+    }
+
+    fn scroll_focused(&mut self, delta: i16, view: &DashboardView) {
+        let (current, maximum) = if self.focus == Focus::Timeline {
+            (self.timeline_scroll, self.maximum_timeline_scroll())
+        } else {
+            (self.primary_scroll, self.maximum_primary_scroll(view))
+        };
+        let next = if delta.is_negative() {
+            current.saturating_sub(delta.unsigned_abs())
+        } else {
+            current.saturating_add(delta.unsigned_abs()).min(maximum)
+        };
+        if self.focus == Focus::Timeline {
+            self.timeline_scroll = next;
+        } else {
+            self.primary_scroll = next;
+        }
     }
 
     fn content<'a>(&'a self, view: &'a DashboardView) -> &'a ViewContent {
@@ -928,7 +966,9 @@ fn draw(frame: &mut ratatui::Frame<'_>, view: &DashboardView, state: &ShellState
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),
-            Constraint::Min(10),
+            Constraint::Min(8),
+            Constraint::Length(3),
+            Constraint::Length(5),
             Constraint::Length(3),
             Constraint::Length(1),
         ])
@@ -936,28 +976,17 @@ fn draw(frame: &mut ratatui::Frame<'_>, view: &DashboardView, state: &ShellState
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled("LoreMesh", theme::header()),
-            Span::raw(format!(" · {} · offline", view.workspace_name)),
+            Span::raw(format!(
+                " · KB: {} · Workspace: {} · offline · AI: off",
+                view.workspace_name, view.workspace_name
+            )),
         ]))
         .block(Block::default().borders(Borders::ALL)),
         rows[0],
     );
-    let active = state.content(view);
-    if active.table.is_some() || active.chart.is_some() {
-        draw_timeline(frame, rows[1], view, state);
-    } else {
-        let body = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(68), Constraint::Percentage(32)])
-            .split(rows[1]);
-        draw_timeline(frame, body[0], view, state);
-        frame.render_widget(
-            Paragraph::new(active.detail_text())
-                .wrap(Wrap { trim: false })
-                .style(Style::default().fg(theme::TEXT))
-                .block(focus_block(&active.title, state.focus == Focus::Context)),
-            body[1],
-        );
-    }
+    draw_primary(frame, rows[1], view, state);
+    draw_lineage(frame, rows[2], view, state);
+    draw_history(frame, rows[3], state);
     let input_style = if state.focus == Focus::Input {
         Style::default()
             .fg(theme::WARNING)
@@ -984,19 +1013,15 @@ fn draw(frame: &mut ratatui::Frame<'_>, view: &DashboardView, state: &ShellState
             },
             state.focus == Focus::Input,
         )),
-        rows[2],
+        rows[4],
     );
-    let latest = state.messages.back().map_or("ready", String::as_str);
     frame.render_widget(
-        Paragraph::new(format!(
-            "Tab focus · PgUp/PgDn Home/End scroll · / command · q or /quit exit · {latest}"
-        ))
-        .style(Style::default().fg(theme::MUTED)),
-        rows[3],
+        Paragraph::new(contextual_shortcuts(state, view)).style(Style::default().fg(theme::MUTED)),
+        rows[5],
     );
 }
 
-fn draw_timeline(
+fn draw_primary(
     frame: &mut ratatui::Frame<'_>,
     area: Rect,
     view: &DashboardView,
@@ -1004,20 +1029,8 @@ fn draw_timeline(
 ) {
     let active = state.content(view);
     if let Some(chart) = &active.chart {
-        draw_chart(frame, area, chart, state.focus == Focus::Timeline);
+        draw_chart(frame, area, chart, state.focus == Focus::Primary);
     } else if let Some(table) = &active.table {
-        let table_sections = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Length(1), Constraint::Min(1)])
-            .split(area);
-        let summary = active.paragraphs.first().map_or("", String::as_str);
-        frame.render_widget(
-            Paragraph::new(format!(
-                "{summary}  ·  PgUp/PgDn scroll  ·  /table sort|filter|search|refresh"
-            ))
-            .style(Style::default().fg(theme::MUTED)),
-            table_sections[0],
-        );
         let widths = (0..table.columns.len())
             .map(|_| Constraint::Fill(1))
             .collect::<Vec<_>>();
@@ -1025,10 +1038,13 @@ fn draw_timeline(
             table
                 .rows
                 .iter()
-                .skip(usize::from(state.timeline_scroll))
+                .skip(usize::from(state.primary_scroll))
                 .enumerate()
                 .map(|(index, row)| {
-                    let style = if index % 2 == 0 {
+                    let absolute = index.saturating_add(usize::from(state.primary_scroll));
+                    let style = if absolute == state.selected_row {
+                        theme::selected()
+                    } else if absolute % 2 == 0 {
                         Style::default()
                     } else {
                         Style::default().bg(theme::SURFACE_ALT)
@@ -1056,26 +1072,87 @@ fn draw_timeline(
                         .bottom_margin(1),
                 )
                 .column_spacing(1)
-                .block(focus_block(&title, state.focus == Focus::Timeline)),
-            table_sections[1],
-        );
-    } else {
-        let mut lines = active.paragraphs.clone();
-        if !state.messages.is_empty() {
-            lines.push(String::new());
-            lines.extend(state.messages.iter().map(|message| format!("› {message}")));
-        }
-        frame.render_widget(
-            Paragraph::new(lines.join("\n"))
-                .style(Style::default().fg(theme::TEXT))
-                .scroll((state.timeline_scroll, 0))
-                .wrap(Wrap { trim: false })
-                .block(focus_block(
-                    "Investigation timeline",
-                    state.focus == Focus::Timeline,
-                )),
+                .block(focus_block(&title, state.focus == Focus::Primary)),
             area,
         );
+    } else {
+        frame.render_widget(
+            Paragraph::new(active.paragraphs.join("\n\n"))
+                .style(Style::default().fg(theme::TEXT))
+                .scroll((state.primary_scroll, 0))
+                .wrap(Wrap { trim: false })
+                .block(focus_block(&active.title, state.focus == Focus::Primary)),
+            area,
+        );
+    }
+}
+
+fn draw_lineage(
+    frame: &mut ratatui::Frame<'_>,
+    area: Rect,
+    view: &DashboardView,
+    state: &ShellState,
+) {
+    let active = state.content(view);
+    let lineage = if let Some(table) = &active.table {
+        table.rows.get(state.selected_row).map_or_else(
+            || "No row selected".into(),
+            |row| {
+                format!(
+                    "Selected row {} · {}",
+                    state.selected_row + 1,
+                    row.join(" → ")
+                )
+            },
+        )
+    } else {
+        format!(
+            "Active view → {} · source lineage available when evidence is selected",
+            active.title
+        )
+    };
+    frame.render_widget(
+        Paragraph::new(lineage)
+            .style(Style::default().fg(theme::SECONDARY))
+            .block(Block::default().title("Lineage").borders(Borders::ALL)),
+        area,
+    );
+}
+
+fn draw_history(frame: &mut ratatui::Frame<'_>, area: Rect, state: &ShellState) {
+    let history = state
+        .messages
+        .iter()
+        .map(|message| format!("› {message}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    frame.render_widget(
+        Paragraph::new(history)
+            .style(Style::default().fg(theme::TEXT))
+            .scroll((state.timeline_scroll, 0))
+            .wrap(Wrap { trim: false })
+            .block(focus_block(
+                "Investigation timeline",
+                state.focus == Focus::Timeline,
+            )),
+        area,
+    );
+}
+
+fn contextual_shortcuts(state: &ShellState, view: &DashboardView) -> String {
+    if state.focus == Focus::Input {
+        return "Enter run · ↑↓ history · Esc primary · Tab focus · /help".into();
+    }
+    if state.focus == Focus::Timeline {
+        return "PgUp/PgDn Home/End timeline · Tab focus · / command · q quit".into();
+    }
+    let active = state.content(view);
+    if active.table.is_some() {
+        "↑↓ select · Enter details · / commands · e export · Tab focus · q quit".into()
+    } else if active.chart.is_some() {
+        "e export · PgUp/PgDn · Tab focus · / commands · q quit".into()
+    } else {
+        "PgUp/PgDn Home/End scroll · / command · e export · Tab focus · q quit".into()
     }
 }
 
@@ -1432,7 +1509,7 @@ mod tests {
         };
         state.submit(&view(), &mut Handler);
         let content = state.custom.expect("help content");
-        assert_eq!(state.focus, Focus::Timeline);
+        assert_eq!(state.focus, Focus::Primary);
         assert!(content.paragraphs[0].contains("TABLES\n/table load"));
         assert!(content.paragraphs[0].contains("/demo shell"));
         assert!(content.paragraphs[0].contains("Start a persistent shell"));
@@ -1459,13 +1536,13 @@ mod tests {
             &view,
             &mut handler,
         );
-        assert_eq!(state.timeline_scroll, 10);
+        assert_eq!(state.primary_scroll, 10);
         state.handle_key(
             KeyEvent::new(KeyCode::End, KeyModifiers::NONE),
             &view,
             &mut handler,
         );
-        assert_eq!(state.timeline_scroll, 25);
+        assert_eq!(state.primary_scroll, 25);
         for _ in 0..3 {
             state.handle_key(
                 KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
@@ -1479,7 +1556,7 @@ mod tests {
             &view,
             &mut handler,
         );
-        assert_eq!(state.timeline_scroll, 0);
+        assert_eq!(state.primary_scroll, 0);
     }
 
     #[test]
@@ -1552,7 +1629,7 @@ mod tests {
             &view,
             &mut handler,
         );
-        assert_eq!(state.focus, Focus::Context);
+        assert_eq!(state.focus, Focus::Timeline);
         state.handle_key(
             KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE),
             &view,
@@ -1574,6 +1651,59 @@ mod tests {
     }
 
     #[test]
+    fn table_rows_select_and_focus_cycles_only_visible_regions() {
+        let mut state = ShellState::default();
+        let view = view();
+        let mut handler = Handler;
+        state.show_content(ViewContent {
+            title: "Results".into(),
+            paragraphs: Vec::new(),
+            table: Some(ViewTable {
+                columns: vec!["name".into()],
+                rows: vec![vec!["one".into()], vec!["two".into()]],
+            }),
+            chart: None,
+            mermaid: None,
+            d2: None,
+        });
+        state.handle_key(
+            KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
+            &view,
+            &mut handler,
+        );
+        assert_eq!(state.selected_row, 1);
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        terminal
+            .draw(|frame| draw(frame, &view, &state))
+            .expect("render selection");
+        assert!(terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .any(|cell| cell.bg == theme::FOCUS));
+        state.handle_key(
+            KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
+            &view,
+            &mut handler,
+        );
+        assert_eq!(state.focus, Focus::Timeline);
+        state.handle_key(
+            KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
+            &view,
+            &mut handler,
+        );
+        assert_eq!(state.focus, Focus::Input);
+        state.handle_key(
+            KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
+            &view,
+            &mut handler,
+        );
+        assert_eq!(state.focus, Focus::Primary);
+    }
+
+    #[test]
     fn layered_layout_renders_with_test_backend() {
         let backend = TestBackend::new(100, 30);
         let mut terminal = Terminal::new(backend).expect("terminal");
@@ -1590,6 +1720,7 @@ mod tests {
             .map(ratatui::buffer::Cell::symbol)
             .collect::<String>();
         assert!(rendered.contains("Investigation timeline"));
+        assert!(rendered.contains("Lineage"));
         assert!(rendered.contains("Command"));
     }
 
@@ -1619,7 +1750,7 @@ mod tests {
             .map(ratatui::buffer::Cell::symbol)
             .collect::<String>();
         assert!(rendered.contains("no results"));
-        assert!(!rendered.contains("Investigation          "));
+        assert!(rendered.contains("Investigation timeline"));
         assert!(buffer.content.iter().any(|cell| cell.fg == theme::PRIMARY));
     }
 

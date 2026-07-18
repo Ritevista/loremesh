@@ -22,6 +22,13 @@ pub fn focused() -> Style {
     Style::default().fg(FOCUS).add_modifier(Modifier::BOLD)
 }
 
+pub fn selected() -> Style {
+    Style::default()
+        .fg(Color::Black)
+        .bg(FOCUS)
+        .add_modifier(Modifier::BOLD)
+}
+
 pub fn header() -> Style {
     Style::default().fg(PRIMARY).add_modifier(Modifier::BOLD)
 }
@@ -49,6 +56,7 @@ mod tests {
         assert_eq!(value("stale").fg, Some(WARNING));
         assert_eq!(value("disputed").fg, Some(SECONDARY));
         assert_eq!(value("ordinary text").fg, Some(TEXT));
+        assert_eq!(selected().bg, Some(FOCUS));
     }
 
     #[test]

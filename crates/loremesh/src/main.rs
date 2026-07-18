@@ -444,12 +444,12 @@ impl CommandHandler for TuiCommandHandler {
                 active.table.as_ref().map_or(0, |table| table.rows.len())
             ))),
             SlashCommand::Compact => Ok(message_result("Compact", "Compaction requires an optional configured model; no content was transmitted or changed.")),
-            SlashCommand::Save { format, output } => save_active_view(&self.root, active, *format, output.as_deref()).map(|message| message_result("Save result", &message)),
+            SlashCommand::Save { format, output } => save_active_view(&self.root, active, *format, output.as_deref()).map(|message| (message, None)),
             SlashCommand::Table(command) => self.table_command(command),
             SlashCommand::Chart { kind, label_column, value_column } => self.chart_command(*kind, label_column, value_column),
             SlashCommand::Shell(command) => self.shell_command(command),
             SlashCommand::Browser(command) => self.browser_command(command),
-            SlashCommand::Demo(kind) => Ok(self.demo_command(*kind)),
+            SlashCommand::Demo(kind) => self.demo_command(*kind),
             SlashCommand::Help | SlashCommand::View(_) | SlashCommand::Clear | SlashCommand::Quit => Ok(message_result("Workbench", "Command handled by the workbench shell.")),
         };
         match result {
@@ -864,6 +864,21 @@ mod tests {
             Some("exports/trace.md")
         )
         .is_err());
+    }
+
+    #[test]
+    fn successful_tui_save_does_not_replace_active_content() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let mut handler = TuiCommandHandler::new(directory.path().to_path_buf());
+        let response = handler.execute(
+            &SlashCommand::Save {
+                format: SaveFormat::Markdown,
+                output: Some("trace.md".into()),
+            },
+            &trace_view(),
+        );
+        assert_eq!(response.message, "Saved trace.md");
+        assert!(response.content.is_none());
     }
 
     #[test]

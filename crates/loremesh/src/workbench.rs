@@ -154,11 +154,22 @@ impl TuiCommandHandler {
         }
     }
 
-    pub(super) fn demo_command(&self, kind: DemoKind) -> (String, Option<ViewContent>) {
+    pub(super) fn demo_command(&mut self, kind: DemoKind) -> Result<(String, Option<ViewContent>)> {
+        if kind == DemoKind::Table {
+            self.grid = Some(DataGrid::new(
+                vec!["name".into(), "status".into(), "duration".into()],
+                vec![
+                    vec!["compile".into(), "passed".into(), "12".into()],
+                    vec!["test".into(), "failed".into(), "31".into()],
+                    vec!["package".into(), "waiting".into(), "5".into()],
+                ],
+            )?);
+            self.grid_source = None;
+        }
         let content = match kind {
             DemoKind::Table => ViewContent {
                 title: "Demo: sortable table".into(),
-                paragraphs: vec!["Try: /table load <file.csv> to work with local data.".into()],
+                paragraphs: Vec::new(),
                 table: Some(ViewTable {
                     columns: vec!["name".into(), "status".into(), "duration".into()],
                     rows: vec![
@@ -221,7 +232,7 @@ impl TuiCommandHandler {
                 d2: None,
             },
         };
-        (format!("Opened {kind:?} demo"), Some(content))
+        Ok((format!("Opened {kind:?} demo"), Some(content)))
     }
 
     pub(super) fn table_command(
@@ -773,7 +784,7 @@ mod tests {
     #[test]
     fn every_demo_produces_visual_content_without_external_input() {
         let temporary = tempfile::tempdir().expect("temporary directory");
-        let workbench = handler(temporary.path());
+        let mut workbench = handler(temporary.path());
         for kind in [
             DemoKind::Table,
             DemoKind::Chart,
@@ -781,11 +792,34 @@ mod tests {
             DemoKind::Code,
             DemoKind::Shell,
         ] {
-            let (_, content) = workbench.demo_command(kind);
+            let (_, content) = workbench.demo_command(kind).expect("demo command");
             let content = content.expect("demo content");
             assert!(!content.title.is_empty());
-            assert!(!content.paragraphs.is_empty() || content.chart.is_some());
+            assert!(
+                !content.paragraphs.is_empty()
+                    || content.table.is_some()
+                    || content.chart.is_some()
+            );
         }
+    }
+
+    #[test]
+    fn demo_table_initializes_the_interactive_grid() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let mut workbench = handler(temporary.path());
+        workbench.demo_command(DemoKind::Table).expect("table demo");
+        let (_, sorted) = workbench
+            .table_command(&TableCommand::Sort {
+                column: "duration".into(),
+                descending: true,
+            })
+            .expect("sort demo table");
+        let rows = sorted
+            .expect("sorted view")
+            .table
+            .expect("sorted table")
+            .rows;
+        assert_eq!(rows[0][0], "test");
     }
 
     #[test]
