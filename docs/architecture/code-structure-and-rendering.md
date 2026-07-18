@@ -17,6 +17,13 @@ This document is the shortest path for reviewing where code belongs and how stru
 | `crates/loremesh-tui/src/markdown.rs` | Parsed Markdown presentation and textual Mermaid/D2 preview | Does not execute diagrams, HTML, scripts, or remote assets |
 | `crates/loremesh/src/main.rs` | CLI and composition root; domain-to-report construction; `ViewContent` to `Report` conversion; safe export writes | Concrete adapters and cross-crate conversions stay here |
 | `crates/loremesh/src/workbench.rs` | Workspace-safe file commands, table/chart orchestration, PTY lifecycle, and application responses | Untrusted I/O is bounded and converted before entering presentation state |
+| `crates/loremesh-core/src/corpus.rs` | Vendor-neutral corpus manifest wire model | Contains no path access, downloader, or vendor-specific fields |
+| `crates/loremesh-core/src/index.rs` | Lexical index port and canonical-ID search projections | Contains no Tantivy, filesystem, SQL, or presentation types |
+| `crates/loremesh-core/src/relationship.rs` | Canonical relationships, pinned code references, and provider provenance | External IDs remain metadata and never become feedback targets |
+| `crates/loremesh-storage/src/corpus.rs` | Safe manifest import, immutable snapshot lifecycle, health diagnostics, relationship persistence | Performs no network access or content execution |
+| `crates/loremesh-storage/src/lexical.rs` | Disposable Tantivy knowledge-index adapter | Cannot delete or rewrite canonical database/object records |
+| `tools/public-corpus-builder` | Explicit pinned public fetch and generic transformation | Never runs in normal CI; Kubernetes knowledge stays outside core |
+| `tools/corpus-generator` | Deterministic synthetic scale data | Writes only requested new output and requires acknowledgement for large sizes |
 
 ## Dependency boundary
 

@@ -19,6 +19,16 @@ loremesh tui
 
 When running through Cargo, replace `loremesh` with `cargo run --manifest-path /path/to/loremesh/Cargo.toml -p loremesh --`. `just demo` creates a deterministic workspace under `target/demo-workspace` and prints its status.
 
+The committed heterogeneous corpus can be imported and searched entirely offline:
+
+```console
+just corpus-fixture
+cd target/test-corpora/fixture-workspace
+../../debug/loremesh index search "bounded retry"
+```
+
+`just corpus-public-verify` validates the pinned Kubernetes profile without network access. `just corpus-public` is the explicit network-enabled build and writes only below `target/test-corpora/`. Scale recipes `just corpus-scale-100m`, `corpus-scale-500m`, `corpus-scale-1g`, and `corpus-scale-2g` require the underlying large-output acknowledgement and never run in CI.
+
 Inside the TUI, press `/` to enter a command, `Tab` or `Shift-Tab` to move focus,
 Page Up/Down or Home/End to scroll results, and `q`, `/quit`, or `/exit` to leave.
 `Esc` safely returns to the timeline and never exits the application. Use `/help` for the command list.
@@ -59,7 +69,7 @@ is not automatically saved, and is never treated as evidence.
 ## Principles
 
 - Imported content stays local unless a user explicitly configures a future network adapter.
-- Source snapshots are authoritative; findings, graphs, indexes, and reports are replaceable derivatives.
+- Source snapshots are authoritative; artifacts, evidence, findings, accepted relationships, traces, and feedback have explicit canonical lifecycles. Indexes and external-engine candidates are replaceable derivatives.
 - Findings carry evidence and separate source lineage from processing lineage.
 - Personal feedback is isolated from organization knowledge.
 - The core is vendor-, UI-, database-, and network-independent.

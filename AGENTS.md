@@ -25,6 +25,8 @@ cargo test --workspace --all-targets --all-features
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps
 cargo deny check
 ./scripts/check-architecture.sh
+cargo test -p loremesh-storage --test corpus_lifecycle
+cargo run -p loremesh-public-corpus -- verify-profile
 ```
 
 If installed, also run `cargo machete` and `cargo llvm-cov --workspace --all-features --html`. Summarize decisions, changed files, exact commands and results, and remaining risks. Leave the working tree clean.
