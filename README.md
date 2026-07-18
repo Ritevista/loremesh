@@ -44,6 +44,11 @@ opens the full multiline command reference there. Use `/demo table`, `/demo char
 `/demo markdown`, `/demo code`, or `/demo shell` to preview capabilities without
 creating input files or executing a command.
 
+`/demo chart` shows the responsive multi-series chart renderer. Structured tables
+and charts use the full result width, semantic focus/status colors, stable series
+colors, labels and values that remain meaningful without color, and a compact
+text fallback for narrow terminals.
+
 `/shell` starts a persistent local shell in the workspace and keeps the bottom
 composer focused. Type commands normally; their output streams into the scrollable
 investigation timeline. Use Ctrl-C to interrupt, and `/exit` or Ctrl-D to return to

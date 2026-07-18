@@ -10,7 +10,7 @@ Investigations produce tables and numeric series that need interactive inspectio
 
 ## Goals
 
-Provide a reusable data grid, renderer-neutral chart models, deterministic terminal charts, safe local CSV load/save, refresh from the same file, and explicit bounded local shell execution.
+Provide a reusable data grid, renderer-neutral multi-series chart models, responsive and color-accessible terminal charts, safe local CSV load/save, refresh from the same file, and explicit bounded local shell execution.
 
 ## Non-goals
 
@@ -26,7 +26,9 @@ The grid supports row selection, vertical and horizontal navigation, stable asce
 
 `/table load <path>` loads UTF-8 CSV inside the workspace; `/table refresh` reloads its original path; `/table save <path>` writes the current visible rows and columns without overwriting; `/table sort <column> <asc|desc>`, `/table filter <column> <text>`, `/table search <text>`, `/table columns <name,...>`, and `/table reset` change only interactive view state.
 
-`/chart <bar|hbar|line|pie> <label-column> <value-column>` builds a chart from the current filtered grid. Values must be finite numbers. Terminal rendering uses Unicode cells and readable labels; it remains useful without color. The chart model is independent of Ratatui and future image exporters.
+`/chart <bar|hbar|line|pie> <label-column> <value-column>` builds a chart from the current filtered grid. Values must be finite numbers. A chart owns one or more named series with non-blank labels and equal category counts. Terminal rendering uses the full result width and provides a title, labels, values, axes where meaningful, and a legend for multiple series. Line charts use Braille markers. Bar, horizontal-bar, line, and proportional distribution views use distinct shapes as well as semantic series colors, so content remains understandable without color. Narrow terminals degrade to labelled textual values rather than truncating into an unreadable plot. The chart model is independent of Ratatui and future image exporters.
+
+Table and chart results replace the context split with one full-width result surface. Tables show styled headers, alternating rows, row/column counts, a visible empty state, focus-colored borders, and a concise scroll/sort/filter/search/refresh command hint. The application uses semantic theme roles (`primary`, `secondary`, `success`, `warning`, `danger`, `muted`, `text`, `focus`) rather than feature-specific hard-coded colors. Series colors come from a stable palette and repeat only after the palette is exhausted.
 
 `/shell` creates one persistent pseudo-terminal using the platform default shell in the workspace directory. The bottom composer remains the input surface and bare input is written to that session. Output streams into the upper investigation timeline. Ctrl-C interrupts the foreground operation; `/exit` or Ctrl-D terminates the shell and restores LoreMesh command mode; `/quit` exits the application. Terminal resize is forwarded to the PTY, scrollback is bounded to 256 KiB, and Page Up/Down plus Home/End remain available. Shell commands are not added to LoreMesh history. The shell is never started implicitly.
 
@@ -34,15 +36,15 @@ The compatibility commands `/shell status`, `/shell enable`, `/shell disable`, a
 
 ## Domain model
 
-`DataGrid` owns immutable headers/rows plus query, filters, sort, visible columns, and selection. `ChartModel` owns chart kind, title, and finite labelled values. `LoadedTable` adds a workspace-relative source path. These are report/presentation models, not canonical knowledge entities. Local process requests, PTY session handles, and results are application-boundary types.
+`DataGrid` owns immutable headers/rows plus query, filters, sort, visible columns, and selection. `ChartModel` owns chart kind, title, categories, and named finite-value series. `ViewContent` may carry a structured chart for terminal rendering; it never stores Ratatui widgets or colors. `LoadedTable` adds a workspace-relative source path. These are report/presentation models, not canonical knowledge entities. Local process requests, PTY session handles, and results are application-boundary types.
 
 ## Interfaces
 
-Pure grid transformations return validation errors. CSV decoding and encoding accept readers/writers at the application boundary. Chart construction consumes the grid's visible projection. The application shell session accepts input, interruption, resize, output polling, and termination operations. The presentation boundary exchanges typed input-mode transitions and content-safe responses. The legacy one-shot runner accepts command text, working directory, deadline, and output limit.
+Pure grid transformations return validation errors. CSV decoding and encoding accept readers/writers at the application boundary. Chart construction consumes labelled value pairs or explicit named series. A renderer accepts `ChartModel`, terminal area, and semantic theme; it does not perform I/O or mutate chart data. The application shell session accepts input, interruption, resize, output polling, and termination operations. The presentation boundary exchanges typed input-mode transitions and content-safe responses. The legacy one-shot runner accepts command text, working directory, deadline, and output limit.
 
 ## Invariants
 
-Rows remain rectangular; headers are non-blank and unique; at least one column remains visible; sort is stable; filters do not mutate source rows; saved CSV matches the current projection; chart values are finite; paths are workspace-relative and outside `.loremesh`; existing files are never silently replaced; interactive execution cannot occur until the user enters `/shell`; only one PTY session exists per TUI; returning to LoreMesh terminates it.
+Rows remain rectangular; headers are non-blank and unique; at least one column remains visible; sort is stable; filters do not mutate source rows; saved CSV matches the current projection; chart titles, series names, and category labels are non-blank; chart values are finite; every series matches the category count; color is never the only carrier of meaning; paths are workspace-relative and outside `.loremesh`; existing files are never silently replaced; interactive execution cannot occur until the user enters `/shell`; only one PTY session exists per TUI; returning to LoreMesh terminates it.
 
 ## Failure modes
 
@@ -58,7 +60,7 @@ The composer visibly shows the active input mode; status content shows grid row 
 
 ## Acceptance criteria
 
-Deterministic tests cover composed sorting/filtering/search, column visibility, CSV round trips, safe load/save/refresh, non-numeric chart rejection, each terminal chart kind, explicit shell entry, input routing, return-to-LoreMesh transitions, PTY output polling, timeout, output truncation, non-zero exits, and control-sequence neutralization. All tests remain offline and use temporary directories.
+Deterministic tests cover composed sorting/filtering/search, column visibility, CSV round trips, safe load/save/refresh, non-numeric and mismatched-series chart rejection, every terminal chart kind, multi-series legends, semantic colors, full-width result layout, narrow-terminal fallback, table empty states, explicit shell entry, input routing, return-to-LoreMesh transitions, PTY output polling, timeout, output truncation, non-zero exits, and control-sequence neutralization. All tests remain offline and use temporary directories.
 
 ## Test strategy
 
@@ -66,4 +68,4 @@ Use unit and property tests for grid invariants and CSV round trips, Ratatui tes
 
 ## Deferred decisions
 
-Cell editing, formulas, XLSX, typed/date columns, aggregation, multiple series, scatter plots, chart export, large-file virtualization, async refresh, direct-program mode, environment allowlists, platform sandboxing, full cursor-addressed terminal emulation, persistent shell transcript export, explicit shell confirmation beyond `/shell`, and promoting reviewed command output into evidence.
+Cell editing, formulas, XLSX, typed/date columns, aggregation, scatter plots, chart export, runtime themes, user-defined palettes, large-file virtualization, async refresh, direct-program mode, environment allowlists, platform sandboxing, full cursor-addressed terminal emulation, persistent shell transcript export, explicit shell confirmation beyond `/shell`, and promoting reviewed command output into evidence.
