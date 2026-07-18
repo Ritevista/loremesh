@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
 use loremesh_tui::browser::{neutralize_terminal, CodeDocument, FileTreeEntry};
-use loremesh_tui::chart::{ChartKind, ChartModel};
+use loremesh_tui::chart::{ChartKind, ChartModel, ChartSeries, ChartValue};
 use loremesh_tui::grid::{DataGrid, SortDirection};
 use loremesh_tui::markdown::MarkdownDocument;
 use loremesh_tui::{BrowserCommand, DemoKind, ShellCommand, TableCommand, ViewContent, ViewTable};
@@ -167,13 +167,29 @@ impl TuiCommandHandler {
                         vec!["package".into(), "waiting".into(), "5".into()],
                     ],
                 }),
+                chart: None,
                 mermaid: None,
                 d2: None,
             },
             DemoKind::Chart => ViewContent {
-                title: "Demo: horizontal bar chart".into(),
-                paragraphs: vec!["compile           12.00 ████████████\ntest              31.00 ███████████████████████████████\npackage            5.00 █████".into()],
+                title: "Demo: multi-series ingestion rate".into(),
+                paragraphs: Vec::new(),
                 table: None,
+                chart: ChartModel::with_series(
+                    "Log ingestion rate (logs/sec)",
+                    ChartKind::Line,
+                    vec![
+                        ChartSeries {
+                            name: "Current".into(),
+                            values: demo_chart_values(&[26.0, 34.0, 42.0, 31.0, 20.0, 37.0]),
+                        },
+                        ChartSeries {
+                            name: "Baseline".into(),
+                            values: demo_chart_values(&[18.0, 25.0, 29.0, 24.0, 32.0, 27.0]),
+                        },
+                    ],
+                )
+                .ok(),
                 mermaid: None,
                 d2: None,
             },
@@ -181,6 +197,7 @@ impl TuiCommandHandler {
                 title: "Demo: Markdown and diagrams".into(),
                 paragraphs: vec!["# Investigation\n\n• Evidence remains local\n\nMermaid/D2 preview:\nsource ──▶ evidence ──▶ finding\n\nOriginal diagram source remains available when imported from a file.".into()],
                 table: None,
+                chart: None,
                 mermaid: Some("flowchart LR\n  source --> evidence\n  evidence --> finding".into()),
                 d2: Some("source -> evidence -> finding".into()),
             },
@@ -188,6 +205,7 @@ impl TuiCommandHandler {
                 title: "Demo: code browser".into(),
                 paragraphs: vec!["1 │ fn investigate() -> Result<()> {\n2 │     collect_evidence()?;\n3 │     Ok(())\n4 │ }\n\nTry: /browse . or /open README.md".into()],
                 table: None,
+                chart: None,
                 mermaid: None,
                 d2: None,
             },
@@ -198,6 +216,7 @@ impl TuiCommandHandler {
                     if self.shell_enabled { "enabled" } else { "disabled" }
                 )],
                 table: None,
+                chart: None,
                 mermaid: None,
                 d2: None,
             },
@@ -275,8 +294,9 @@ impl TuiCommandHandler {
             ChartModel::from_pairs(format!("{value_column} by {label_column}"), kind, pairs)?;
         let view = ViewContent {
             title: chart.title.clone(),
-            paragraphs: vec![chart.render_text(80)],
+            paragraphs: Vec::new(),
             table: None,
+            chart: Some(chart),
             mermaid: None,
             d2: None,
         };
@@ -314,6 +334,7 @@ impl TuiCommandHandler {
                             columns: vec!["Path".into(), "Kind".into()],
                             rows,
                         }),
+                        chart: None,
                         mermaid: None,
                         d2: None,
                     }),
@@ -465,10 +486,22 @@ impl TuiCommandHandler {
                 grid.total_rows()
             )],
             table: Some(grid.projection()),
+            chart: None,
             mermaid: None,
             d2: None,
         })
     }
+}
+
+fn demo_chart_values(values: &[f64]) -> Vec<ChartValue> {
+    values
+        .iter()
+        .enumerate()
+        .map(|(index, value)| ChartValue {
+            label: format!("{index:02}"),
+            value: *value,
+        })
+        .collect()
 }
 
 fn text_view(title: &str, text: String) -> ViewContent {
@@ -476,6 +509,7 @@ fn text_view(title: &str, text: String) -> ViewContent {
         title: title.into(),
         paragraphs: vec![text],
         table: None,
+        chart: None,
         mermaid: None,
         d2: None,
     }
@@ -750,7 +784,7 @@ mod tests {
             let (_, content) = workbench.demo_command(kind);
             let content = content.expect("demo content");
             assert!(!content.title.is_empty());
-            assert!(!content.paragraphs.is_empty());
+            assert!(!content.paragraphs.is_empty() || content.chart.is_some());
         }
     }
 

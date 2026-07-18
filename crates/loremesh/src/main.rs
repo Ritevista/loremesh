@@ -265,6 +265,7 @@ fn message_view(title: &str, message: &str) -> ViewContent {
         title: title.into(),
         paragraphs: vec![message.into()],
         table: None,
+        chart: None,
         mermaid: None,
         d2: None,
     }
@@ -277,6 +278,9 @@ fn report_from_view(active: &ViewContent) -> Result<Report> {
         .cloned()
         .map(ReportBlock::Paragraph)
         .collect::<Vec<_>>();
+    if let Some(chart) = &active.chart {
+        blocks.push(ReportBlock::Paragraph(chart.render_text(80)));
+    }
     if let Some(table) = &active.table {
         blocks.push(ReportBlock::Table(TableModel::new(
             active.title.clone(),
@@ -613,6 +617,7 @@ mod tests {
                 columns: vec!["From".into(), "To".into()],
                 rows: vec![vec!["finding".into(), "evidence".into()]],
             }),
+            chart: None,
             mermaid: Some("flowchart LR\n  finding --> evidence".into()),
             d2: Some("finding -> evidence".into()),
         }

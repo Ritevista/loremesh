@@ -5,6 +5,7 @@ pub mod browser;
 pub mod chart;
 pub mod grid;
 pub mod markdown;
+pub mod theme;
 
 use std::collections::VecDeque;
 use std::fmt::Write as _;
@@ -19,9 +20,13 @@ use crossterm::terminal::{
 use loremesh_core::{Artifact, Finding, Trace};
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
+use ratatui::symbols::Marker;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, Wrap};
+use ratatui::widgets::{
+    Axis, Bar, BarChart, Block, Borders, Cell, Chart, Dataset, GraphType, Paragraph, Row, Table,
+    Wrap,
+};
 use ratatui::Terminal;
 use thiserror::Error;
 
@@ -41,11 +46,12 @@ pub struct ViewTable {
 }
 
 /// Structured content displayed by the shell and passed to save handlers.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ViewContent {
     pub title: String,
     pub paragraphs: Vec<String>,
     pub table: Option<ViewTable>,
+    pub chart: Option<chart::ChartModel>,
     pub mermaid: Option<String>,
     pub d2: Option<String>,
 }
@@ -64,12 +70,24 @@ impl ViewContent {
                 table.columns.len()
             );
         }
+        if let Some(chart) = &self.chart {
+            if !text.is_empty() {
+                text.push_str("\n\n");
+            }
+            let _ = write!(
+                text,
+                "{:?} chart · {} series · {} points",
+                chart.kind,
+                chart.series.len(),
+                chart.series.first().map_or(0, |series| series.values.len())
+            );
+        }
         text
     }
 }
 
 /// Pure presentation data projected from `LoreMesh` domain state.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DashboardView {
     pub workspace_name: String,
     pub summary: ViewContent,
@@ -172,6 +190,7 @@ impl DashboardView {
                     selected,
                 ],
                 table: None,
+                chart: None,
                 mermaid: None,
                 d2: None,
             },
@@ -182,6 +201,7 @@ impl DashboardView {
                     columns: vec!["Name".into(), "Artifact ID".into(), "Bytes".into()],
                     rows: artifact_rows,
                 }),
+                chart: None,
                 mermaid: None,
                 d2: None,
             },
@@ -192,6 +212,7 @@ impl DashboardView {
                     columns: vec!["Title".into(), "Status".into(), "Scope".into()],
                     rows: finding_rows,
                 }),
+                chart: None,
                 mermaid: None,
                 d2: None,
             },
@@ -206,6 +227,7 @@ impl DashboardView {
                     columns: vec!["Node".into(), "ID".into()],
                     rows: trace_rows,
                 }),
+                chart: None,
                 mermaid,
                 d2,
             },
@@ -558,7 +580,7 @@ fn parse_save<'a>(mut parts: impl Iterator<Item = &'a str>) -> Result<SlashComma
 }
 
 /// Content-safe result from application command handling.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CommandResponse {
     pub message: String,
     pub content: Option<ViewContent>,
@@ -577,7 +599,7 @@ pub trait CommandHandler {
 }
 
 /// Pure interactive shell state.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ShellState {
     pub focus: Focus,
     pub input: String,
@@ -837,6 +859,7 @@ fn text_content(title: &str, text: &str) -> ViewContent {
         title: title.into(),
         paragraphs: vec![text.into()],
         table: None,
+        chart: None,
         mermaid: None,
         d2: None,
     }
@@ -890,11 +913,9 @@ fn event_loop<H: CommandHandler>(
 
 fn focus_block(title: &str, focused: bool) -> Block<'_> {
     let style = if focused {
-        Style::default()
-            .fg(Color::Cyan)
-            .add_modifier(Modifier::BOLD)
+        theme::focused()
     } else {
-        Style::default().fg(Color::DarkGray)
+        Style::default().fg(theme::MUTED)
     };
     Block::default()
         .title(title)
@@ -914,35 +935,35 @@ fn draw(frame: &mut ratatui::Frame<'_>, view: &DashboardView, state: &ShellState
         .split(frame.area());
     frame.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled(
-                "LoreMesh",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
+            Span::styled("LoreMesh", theme::header()),
             Span::raw(format!(" · {} · offline", view.workspace_name)),
         ]))
         .block(Block::default().borders(Borders::ALL)),
         rows[0],
     );
-    let body = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(68), Constraint::Percentage(32)])
-        .split(rows[1]);
-    draw_timeline(frame, body[0], view, state);
     let active = state.content(view);
-    frame.render_widget(
-        Paragraph::new(active.detail_text())
-            .wrap(Wrap { trim: false })
-            .block(focus_block(&active.title, state.focus == Focus::Context)),
-        body[1],
-    );
+    if active.table.is_some() || active.chart.is_some() {
+        draw_timeline(frame, rows[1], view, state);
+    } else {
+        let body = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(68), Constraint::Percentage(32)])
+            .split(rows[1]);
+        draw_timeline(frame, body[0], view, state);
+        frame.render_widget(
+            Paragraph::new(active.detail_text())
+                .wrap(Wrap { trim: false })
+                .style(Style::default().fg(theme::TEXT))
+                .block(focus_block(&active.title, state.focus == Focus::Context)),
+            body[1],
+        );
+    }
     let input_style = if state.focus == Focus::Input {
         Style::default()
-            .fg(Color::Yellow)
+            .fg(theme::WARNING)
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(Color::Gray)
+        Style::default().fg(theme::TEXT)
     };
     frame.render_widget(
         Paragraph::new(format!(
@@ -970,7 +991,7 @@ fn draw(frame: &mut ratatui::Frame<'_>, view: &DashboardView, state: &ShellState
         Paragraph::new(format!(
             "Tab focus · PgUp/PgDn Home/End scroll · / command · q or /quit exit · {latest}"
         ))
-        .style(Style::default().fg(Color::DarkGray)),
+        .style(Style::default().fg(theme::MUTED)),
         rows[3],
     );
 }
@@ -982,29 +1003,61 @@ fn draw_timeline(
     state: &ShellState,
 ) {
     let active = state.content(view);
-    if let Some(table) = &active.table {
+    if let Some(chart) = &active.chart {
+        draw_chart(frame, area, chart, state.focus == Focus::Timeline);
+    } else if let Some(table) = &active.table {
+        let table_sections = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(1), Constraint::Min(1)])
+            .split(area);
+        let summary = active.paragraphs.first().map_or("", String::as_str);
+        frame.render_widget(
+            Paragraph::new(format!(
+                "{summary}  ·  PgUp/PgDn scroll  ·  /table sort|filter|search|refresh"
+            ))
+            .style(Style::default().fg(theme::MUTED)),
+            table_sections[0],
+        );
         let widths = (0..table.columns.len())
             .map(|_| Constraint::Fill(1))
             .collect::<Vec<_>>();
-        let rows = table
-            .rows
-            .iter()
-            .skip(usize::from(state.timeline_scroll))
-            .map(|row| Row::new(row.iter().cloned().map(Cell::from)));
+        let rows =
+            table
+                .rows
+                .iter()
+                .skip(usize::from(state.timeline_scroll))
+                .enumerate()
+                .map(|(index, row)| {
+                    let style = if index % 2 == 0 {
+                        Style::default()
+                    } else {
+                        Style::default().bg(theme::SURFACE_ALT)
+                    };
+                    Row::new(row.iter().map(|value| {
+                        Cell::from(value.clone()).style(theme::value(value).patch(style))
+                    }))
+                });
+        let title = format!(
+            "{} · {} rows × {} columns{}",
+            active.title,
+            table.rows.len(),
+            table.columns.len(),
+            if table.rows.is_empty() {
+                " · no results"
+            } else {
+                ""
+            }
+        );
         frame.render_widget(
             Table::new(rows, widths)
                 .header(
-                    Row::new(table.columns.clone()).style(
-                        Style::default()
-                            .fg(Color::Green)
-                            .add_modifier(Modifier::BOLD),
-                    ),
+                    Row::new(table.columns.clone())
+                        .style(theme::header())
+                        .bottom_margin(1),
                 )
-                .block(focus_block(
-                    "Timeline / results",
-                    state.focus == Focus::Timeline,
-                )),
-            area,
+                .column_spacing(1)
+                .block(focus_block(&title, state.focus == Focus::Timeline)),
+            table_sections[1],
         );
     } else {
         let mut lines = active.paragraphs.clone();
@@ -1014,6 +1067,7 @@ fn draw_timeline(
         }
         frame.render_widget(
             Paragraph::new(lines.join("\n"))
+                .style(Style::default().fg(theme::TEXT))
                 .scroll((state.timeline_scroll, 0))
                 .wrap(Wrap { trim: false })
                 .block(focus_block(
@@ -1025,9 +1079,242 @@ fn draw_timeline(
     }
 }
 
+fn draw_chart(
+    frame: &mut ratatui::Frame<'_>,
+    area: Rect,
+    chart: &chart::ChartModel,
+    focused: bool,
+) {
+    if area.width < 60 || area.height < 10 {
+        frame.render_widget(
+            Paragraph::new(chart.render_text(usize::from(area.width.saturating_sub(2))))
+                .style(Style::default().fg(theme::TEXT))
+                .wrap(Wrap { trim: false })
+                .block(focus_block(
+                    &format!("{} · compact view", chart.title),
+                    focused,
+                )),
+            area,
+        );
+        return;
+    }
+
+    let chart_area = if chart.series.len() > 1 {
+        let sections = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(1), Constraint::Min(1)])
+            .split(area);
+        let legend = chart
+            .series
+            .iter()
+            .enumerate()
+            .flat_map(|(index, series)| {
+                [
+                    Span::styled("● ", Style::default().fg(theme::series(index))),
+                    Span::styled(
+                        format!("{}  ", series.name),
+                        Style::default().fg(theme::TEXT),
+                    ),
+                ]
+            })
+            .collect::<Vec<_>>();
+        frame.render_widget(Paragraph::new(Line::from(legend)), sections[0]);
+        sections[1]
+    } else {
+        area
+    };
+
+    match chart.kind {
+        chart::ChartKind::Line => draw_line_chart(frame, chart_area, chart, focused),
+        chart::ChartKind::Bar | chart::ChartKind::HorizontalBar => {
+            draw_bar_chart(frame, chart_area, chart, focused);
+        }
+        chart::ChartKind::Pie => draw_distribution_chart(frame, chart_area, chart, focused),
+    }
+}
+
+fn draw_line_chart(
+    frame: &mut ratatui::Frame<'_>,
+    area: Rect,
+    chart: &chart::ChartModel,
+    focused: bool,
+) {
+    let points = chart
+        .series
+        .iter()
+        .map(|series| {
+            series
+                .values
+                .iter()
+                .enumerate()
+                .map(|(index, value)| (index_as_f64(index), value.value))
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    let datasets = chart
+        .series
+        .iter()
+        .zip(&points)
+        .enumerate()
+        .map(|(index, (series, values))| {
+            Dataset::default()
+                .name(series.name.clone())
+                .marker(Marker::Braille)
+                .graph_type(GraphType::Line)
+                .style(Style::default().fg(theme::series(index)))
+                .data(values)
+        })
+        .collect::<Vec<_>>();
+    let values = chart
+        .series
+        .iter()
+        .flat_map(|series| series.values.iter().map(|value| value.value))
+        .collect::<Vec<_>>();
+    let minimum = values.iter().copied().fold(f64::INFINITY, f64::min);
+    let maximum = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let padding = ((maximum - minimum).abs() * 0.1).max(1.0);
+    let last = chart.series[0].values.len().saturating_sub(1);
+    let middle = last / 2;
+    let labels = &chart.series[0].values;
+    let x_labels = [0, middle, last]
+        .into_iter()
+        .map(|index| Line::from(labels[index].label.clone()))
+        .collect::<Vec<_>>();
+    let y_labels = [
+        minimum - padding,
+        f64::midpoint(minimum, maximum),
+        maximum + padding,
+    ]
+    .into_iter()
+    .map(|value| Line::from(format!("{value:.1}")))
+    .collect::<Vec<_>>();
+    let widget = Chart::new(datasets)
+        .block(focus_block(&chart.title, focused))
+        .style(Style::default().fg(theme::TEXT))
+        .legend_position(None)
+        .x_axis(
+            Axis::default()
+                .title("Sample")
+                .style(Style::default().fg(theme::MUTED))
+                .bounds([0.0, index_as_f64(last.max(1))])
+                .labels(x_labels),
+        )
+        .y_axis(
+            Axis::default()
+                .title("Value")
+                .style(Style::default().fg(theme::MUTED))
+                .bounds([minimum - padding, maximum + padding])
+                .labels(y_labels),
+        );
+    frame.render_widget(widget, area);
+}
+
+fn draw_bar_chart(
+    frame: &mut ratatui::Frame<'_>,
+    area: Rect,
+    chart: &chart::ChartModel,
+    focused: bool,
+) {
+    let maximum = chart
+        .series
+        .iter()
+        .flat_map(|series| &series.values)
+        .map(|value| value.value.abs())
+        .fold(0.0_f64, f64::max)
+        .max(1.0);
+    let mut widget = BarChart::default()
+        .block(focus_block(&chart.title, focused))
+        .bar_gap(1)
+        .group_gap(2)
+        .bar_width(if chart.kind == chart::ChartKind::HorizontalBar {
+            1
+        } else {
+            5
+        })
+        .direction(if chart.kind == chart::ChartKind::HorizontalBar {
+            Direction::Horizontal
+        } else {
+            Direction::Vertical
+        });
+    for (category_index, category) in chart.series[0].values.iter().enumerate() {
+        let bars = chart
+            .series
+            .iter()
+            .enumerate()
+            .map(|(series_index, series)| {
+                let value = series.values[category_index].value;
+                let ratio = value.abs() / maximum;
+                let scaled = (1_u32..=100)
+                    .filter(|cell| (f64::from(*cell) / 100.0) <= ratio)
+                    .count();
+                let scaled = u64::try_from(scaled).map_or(100, std::convert::identity);
+                Bar::default()
+                    .label(series.name.clone())
+                    .value(scaled)
+                    .text_value(format!("{value:.1}"))
+                    .style(theme::series(series_index))
+                    .value_style(Style::default().fg(theme::TEXT))
+            })
+            .collect::<Vec<_>>();
+        widget = widget.data(ratatui::widgets::BarGroup::new(bars).label(category.label.clone()));
+    }
+    frame.render_widget(widget, area);
+}
+
+fn draw_distribution_chart(
+    frame: &mut ratatui::Frame<'_>,
+    area: Rect,
+    chart: &chart::ChartModel,
+    focused: bool,
+) {
+    let mut lines = Vec::new();
+    for (series_index, series) in chart.series.iter().enumerate() {
+        if chart.series.len() > 1 {
+            lines.push(Line::styled(series.name.clone(), theme::header()));
+        }
+        let total = series
+            .values
+            .iter()
+            .map(|value| value.value.abs())
+            .sum::<f64>();
+        for (value_index, value) in series.values.iter().enumerate() {
+            let percent = if total == 0.0 {
+                0.0
+            } else {
+                value.value.abs() * 100.0 / total
+            };
+            let cells = (1_u32..=40)
+                .filter(|cell| f64::from(*cell) / 40.0 <= percent / 100.0)
+                .count();
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("{:>16} ", value.label.chars().take(16).collect::<String>()),
+                    Style::default().fg(theme::TEXT),
+                ),
+                Span::styled(
+                    "█".repeat(cells),
+                    Style::default().fg(theme::series(series_index + value_index)),
+                ),
+                Span::styled(format!(" {percent:5.1}%"), Style::default().fg(theme::TEXT)),
+            ]));
+        }
+    }
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(focus_block(&chart.title, focused))
+            .wrap(Wrap { trim: false }),
+        area,
+    );
+}
+
+fn index_as_f64(index: usize) -> f64 {
+    u32::try_from(index).map_or(f64::from(u32::MAX), f64::from)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::chart::{ChartSeries, ChartValue};
     use loremesh_core::{ArtifactId, SnapshotId};
     use proptest::prelude::*;
     use ratatui::backend::TestBackend;
@@ -1045,6 +1332,42 @@ mod tests {
 
     fn view() -> DashboardView {
         DashboardView::from_domain("demo", &[], &[], None)
+    }
+
+    fn multi_series_chart(kind: chart::ChartKind) -> chart::ChartModel {
+        chart::ChartModel::with_series(
+            "Resource usage",
+            kind,
+            vec![
+                ChartSeries {
+                    name: "Current".into(),
+                    values: vec![
+                        ChartValue {
+                            label: "node-1".into(),
+                            value: 30.0,
+                        },
+                        ChartValue {
+                            label: "node-2".into(),
+                            value: 64.0,
+                        },
+                    ],
+                },
+                ChartSeries {
+                    name: "Baseline".into(),
+                    values: vec![
+                        ChartValue {
+                            label: "node-1".into(),
+                            value: 24.0,
+                        },
+                        ChartValue {
+                            label: "node-2".into(),
+                            value: 51.0,
+                        },
+                    ],
+                },
+            ],
+        )
+        .expect("valid multi-series chart")
     }
 
     #[test]
@@ -1127,6 +1450,7 @@ mod tests {
                 .collect::<Vec<_>>()
                 .join("\n")],
             table: None,
+            chart: None,
             mermaid: None,
             d2: None,
         });
@@ -1267,6 +1591,100 @@ mod tests {
             .collect::<String>();
         assert!(rendered.contains("Investigation timeline"));
         assert!(rendered.contains("Command"));
+    }
+
+    #[test]
+    fn structured_results_use_full_width_and_semantic_table_colors() {
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        let mut state = ShellState::default();
+        state.show_content(ViewContent {
+            title: "Empty findings".into(),
+            paragraphs: Vec::new(),
+            table: Some(ViewTable {
+                columns: vec!["Status".into(), "Count".into()],
+                rows: Vec::new(),
+            }),
+            chart: None,
+            mermaid: None,
+            d2: None,
+        });
+        terminal
+            .draw(|frame| draw(frame, &view(), &state))
+            .expect("render table");
+        let buffer = terminal.backend().buffer();
+        let rendered = buffer
+            .content
+            .iter()
+            .map(ratatui::buffer::Cell::symbol)
+            .collect::<String>();
+        assert!(rendered.contains("no results"));
+        assert!(!rendered.contains("Investigation          "));
+        assert!(buffer.content.iter().any(|cell| cell.fg == theme::PRIMARY));
+    }
+
+    #[test]
+    fn every_structured_chart_renderer_is_colored_and_labelled() {
+        for kind in [
+            chart::ChartKind::Bar,
+            chart::ChartKind::HorizontalBar,
+            chart::ChartKind::Line,
+            chart::ChartKind::Pie,
+        ] {
+            let backend = TestBackend::new(100, 30);
+            let mut terminal = Terminal::new(backend).expect("terminal");
+            let mut state = ShellState::default();
+            state.show_content(ViewContent {
+                title: "Resource usage".into(),
+                paragraphs: Vec::new(),
+                table: None,
+                chart: Some(multi_series_chart(kind)),
+                mermaid: None,
+                d2: None,
+            });
+            terminal
+                .draw(|frame| draw(frame, &view(), &state))
+                .expect("render chart");
+            let buffer = terminal.backend().buffer();
+            let rendered = buffer
+                .content
+                .iter()
+                .map(ratatui::buffer::Cell::symbol)
+                .collect::<String>();
+            assert!(rendered.contains("Resource usage"));
+            assert!(rendered.contains("Current") || rendered.contains("Baseline"));
+            assert!(buffer
+                .content
+                .iter()
+                .any(|cell| cell.fg == theme::PRIMARY || cell.fg == theme::SECONDARY));
+        }
+    }
+
+    #[test]
+    fn narrow_chart_uses_readable_text_fallback() {
+        let backend = TestBackend::new(50, 16);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        let mut state = ShellState::default();
+        state.show_content(ViewContent {
+            title: "Resource usage".into(),
+            paragraphs: Vec::new(),
+            table: None,
+            chart: Some(multi_series_chart(chart::ChartKind::Line)),
+            mermaid: None,
+            d2: None,
+        });
+        terminal
+            .draw(|frame| draw(frame, &view(), &state))
+            .expect("render compact chart");
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(ratatui::buffer::Cell::symbol)
+            .collect::<String>();
+        assert!(rendered.contains("compact view"));
+        assert!(rendered.contains("Current"));
     }
 
     #[test]

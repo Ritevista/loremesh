@@ -22,6 +22,12 @@ pub struct ChartValue {
 pub struct ChartModel {
     pub title: String,
     pub kind: ChartKind,
+    pub series: Vec<ChartSeries>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChartSeries {
+    pub name: String,
     pub values: Vec<ChartValue>,
 }
 
@@ -31,6 +37,8 @@ pub enum ChartError {
     BlankLabel,
     #[error("chart requires at least one value")]
     NoValues,
+    #[error("every chart series must use the same non-blank category labels")]
+    MismatchedCategories,
     #[error("chart values must be finite numbers")]
     NonFinite,
     #[error("'{value}' is not a finite number")]
@@ -43,20 +51,62 @@ impl ChartModel {
         kind: ChartKind,
         values: Vec<ChartValue>,
     ) -> Result<Self, ChartError> {
+        Self::with_series(
+            title,
+            kind,
+            vec![ChartSeries {
+                name: "Series 1".into(),
+                values,
+            }],
+        )
+    }
+
+    pub fn with_series(
+        title: impl Into<String>,
+        kind: ChartKind,
+        series: Vec<ChartSeries>,
+    ) -> Result<Self, ChartError> {
         let title = title.into();
-        if title.trim().is_empty() || values.iter().any(|value| value.label.trim().is_empty()) {
+        if title.trim().is_empty()
+            || series.iter().any(|item| item.name.trim().is_empty())
+            || series
+                .iter()
+                .flat_map(|item| &item.values)
+                .any(|value| value.label.trim().is_empty())
+        {
             return Err(ChartError::BlankLabel);
         }
-        if values.is_empty() {
+        let Some(first) = series.first() else {
+            return Err(ChartError::NoValues);
+        };
+        if first.values.is_empty() || series.iter().any(|item| item.values.is_empty()) {
             return Err(ChartError::NoValues);
         }
-        if values.iter().any(|value| !value.value.is_finite()) {
+        let categories = first
+            .values
+            .iter()
+            .map(|value| &value.label)
+            .collect::<Vec<_>>();
+        if series.iter().skip(1).any(|item| {
+            item.values
+                .iter()
+                .map(|value| &value.label)
+                .collect::<Vec<_>>()
+                != categories
+        }) {
+            return Err(ChartError::MismatchedCategories);
+        }
+        if series
+            .iter()
+            .flat_map(|item| &item.values)
+            .any(|value| !value.value.is_finite())
+        {
             return Err(ChartError::NonFinite);
         }
         Ok(Self {
             title,
             kind,
-            values,
+            series,
         })
     }
 
@@ -87,65 +137,80 @@ impl ChartModel {
 
     fn render_bars(&self, width: usize) -> String {
         let maximum = self
-            .values
+            .series
             .iter()
+            .flat_map(|series| &series.values)
             .map(|value| value.value.abs())
             .fold(0.0_f64, f64::max);
         let bar_width = width.saturating_sub(24).clamp(1, 60);
         let bar_width_u32 = u32::try_from(bar_width).map_or(60, std::convert::identity);
         let mut rendered = String::new();
-        for value in &self.values {
-            let cells = if maximum == 0.0 {
-                0
-            } else {
-                let ratio = value.value.abs() / maximum;
-                (1..=bar_width_u32)
-                    .filter(|cell| f64::from(*cell) / f64::from(bar_width_u32) <= ratio)
-                    .count()
-            };
-            let _ = writeln!(
-                rendered,
-                "{:<16} {:>8.2} {}",
-                truncate(&value.label, 16),
-                value.value,
-                "█".repeat(cells)
-            );
+        for series in &self.series {
+            if self.series.len() > 1 {
+                let _ = writeln!(rendered, "{}", series.name);
+            }
+            for value in &series.values {
+                let cells = if maximum == 0.0 {
+                    0
+                } else {
+                    let ratio = value.value.abs() / maximum;
+                    (1..=bar_width_u32)
+                        .filter(|cell| f64::from(*cell) / f64::from(bar_width_u32) <= ratio)
+                        .count()
+                };
+                let _ = writeln!(
+                    rendered,
+                    "{:<16} {:>8.2} {}",
+                    truncate(&value.label, 16),
+                    value.value,
+                    "█".repeat(cells)
+                );
+            }
         }
         rendered
     }
 
     fn render_line(&self) -> String {
         let mut rendered = String::new();
-        for (index, value) in self.values.iter().enumerate() {
-            let connector = if index == 0 { "●" } else { "─●" };
-            let _ = write!(
-                rendered,
-                "{connector} {} ({:.2}) ",
-                value.label, value.value
-            );
+        for series in &self.series {
+            let _ = write!(rendered, "{}: ", series.name);
+            for (index, value) in series.values.iter().enumerate() {
+                let connector = if index == 0 { "●" } else { "─●" };
+                let _ = write!(
+                    rendered,
+                    "{connector} {} ({:.2}) ",
+                    value.label, value.value
+                );
+            }
+            rendered.push('\n');
         }
         rendered
     }
 
     fn render_pie(&self) -> String {
-        let total = self
-            .values
-            .iter()
-            .map(|value| value.value.abs())
-            .sum::<f64>();
         let mut rendered = String::new();
-        for value in &self.values {
-            let percent = if total == 0.0 {
-                0.0
-            } else {
-                value.value.abs() * 100.0 / total
-            };
-            let _ = writeln!(
-                rendered,
-                "◉ {:<16} {:>6.1}%",
-                truncate(&value.label, 16),
-                percent
-            );
+        for series in &self.series {
+            let total = series
+                .values
+                .iter()
+                .map(|value| value.value.abs())
+                .sum::<f64>();
+            if self.series.len() > 1 {
+                let _ = writeln!(rendered, "{}", series.name);
+            }
+            for value in &series.values {
+                let percent = if total == 0.0 {
+                    0.0
+                } else {
+                    value.value.abs() * 100.0 / total
+                };
+                let _ = writeln!(
+                    rendered,
+                    "◉ {:<16} {:>6.1}%",
+                    truncate(&value.label, 16),
+                    percent
+                );
+            }
         }
         rendered
     }
@@ -203,5 +268,30 @@ mod tests {
             }]
         )
         .is_err());
+    }
+
+    #[test]
+    fn multi_series_require_matching_categories() {
+        let result = ChartModel::with_series(
+            "chart",
+            ChartKind::Line,
+            vec![
+                ChartSeries {
+                    name: "one".into(),
+                    values: vec![ChartValue {
+                        label: "a".into(),
+                        value: 1.0,
+                    }],
+                },
+                ChartSeries {
+                    name: "two".into(),
+                    values: vec![ChartValue {
+                        label: "b".into(),
+                        value: 2.0,
+                    }],
+                },
+            ],
+        );
+        assert_eq!(result, Err(ChartError::MismatchedCategories));
     }
 }
