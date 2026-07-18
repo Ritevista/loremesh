@@ -64,7 +64,7 @@ Deterministic tests cover composed sorting/filtering/search, column visibility, 
 
 ## Test strategy
 
-Use unit and property tests for grid invariants and CSV round trips, Ratatui test-backend tests for grid/chart rendering, application tests with deterministic fixture CSV files, and runner contract tests using the current test executable rather than platform network tools. Use a portable echo marker for the PTY contract and do not snapshot platform-specific prompts or arbitrary shell output.
+Use unit and property tests for grid invariants and CSV round trips, Ratatui test-backend tests for grid/chart rendering, application tests with deterministic fixture CSV files, and runner contract tests using the current test executable rather than platform network tools. Unix CI uses a portable echo marker to verify PTY input and streamed output. Windows CI verifies ConPTY creation, child liveness, input, resize, interrupt, and shutdown because GitHub-hosted service sessions may keep ConPTY children alive without exposing their output stream; maintainers must smoke-test visible interactive output on Windows before a release. Do not snapshot platform-specific prompts or arbitrary shell output.
 
 ## Deferred decisions
 
