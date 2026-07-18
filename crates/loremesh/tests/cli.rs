@@ -161,3 +161,32 @@ fn corpus_import_index_search_drop_and_rebuild_are_offline() {
         .success()
         .stdout(predicate::str::contains("Artifacts: 52"));
 }
+
+#[test]
+fn corpus_open_discovers_directory_imports_and_builds_index() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let workspace = temporary.path().join("workspace");
+    let corpus = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join("tests/fixtures/knowledge-base");
+    Command::cargo_bin("loremesh")
+        .expect("binary")
+        .args(["workspace", "init"])
+        .arg(&workspace)
+        .assert()
+        .success();
+    Command::cargo_bin("loremesh")
+        .expect("binary")
+        .current_dir(&workspace)
+        .args(["corpus", "open"])
+        .arg(&corpus)
+        .arg("--no-tui")
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("Documents imported:").and(predicate::str::contains(
+                "Knowledge index ready: 50 document(s)",
+            )),
+        );
+    assert!(workspace.join(".loremesh/indexes/knowledge").is_dir());
+}

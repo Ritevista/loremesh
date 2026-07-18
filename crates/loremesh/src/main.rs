@@ -90,6 +90,13 @@ enum CorpusCommand {
         #[arg(long)]
         allow_large: bool,
     },
+    /// Import a corpus directory, build its knowledge index, and open the TUI.
+    Open {
+        corpus: PathBuf,
+        /// Complete import and indexing without starting the interactive TUI.
+        #[arg(long)]
+        no_tui: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -201,25 +208,7 @@ fn run() -> Result<()> {
         Command::Demo {
             command: DemoCommand::Seed,
         } => seed_demo(&current_root()?)?,
-        Command::Tui => {
-            let root = current_root()?;
-            let repository = LocalRepository::open(&root)?;
-            let workspace = repository.workspace()?;
-            let artifacts = repository.artifacts()?;
-            let findings = repository.findings()?;
-            let trace = findings
-                .first()
-                .map(|finding| repository.trace_for(finding))
-                .transpose()?;
-            let view = loremesh_tui::DashboardView::from_domain(
-                &workspace.name,
-                &artifacts,
-                &findings,
-                trace.as_ref(),
-            );
-            let mut handler = TuiCommandHandler::new(root);
-            loremesh_tui::run(&view, &mut handler).context("terminal dashboard failed")?;
-        }
+        Command::Tui => launch_tui(current_root()?)?,
         Command::Report {
             command: ReportCommand::Export { format, output },
         } => export_report(format, output.as_deref())?,
@@ -251,7 +240,68 @@ fn run_corpus(command: CorpusCommand) -> Result<()> {
                 })?;
             print_corpus_import(&imported)
         }
+        CorpusCommand::Open { corpus, no_tui } => {
+            let manifest = corpus_manifest_path(&corpus)?;
+            let manifest_bytes = fs::metadata(&manifest)
+                .with_context(|| format!("could not inspect {}", manifest.display()))?
+                .len();
+            let limits = if manifest_bytes > CorpusImportLimits::default().max_manifest_bytes {
+                println!("Large corpus detected; using bounded scale-import limits.");
+                CorpusImportLimits::large_local()
+            } else {
+                CorpusImportLimits::default()
+            };
+            let root = current_root()?;
+            let mut repository = LocalRepository::open(&root)?;
+            let imported = repository
+                .import_corpus_manifest(&manifest, limits)
+                .with_context(|| format!("could not import corpus {}", manifest.display()))?;
+            print_corpus_import(&imported)?;
+            println!("Building disposable knowledge index...");
+            let documents = repository.index_documents()?;
+            let indexed = TantivyIndex::knowledge_for_workspace(&root).rebuild(documents)?;
+            println!("Knowledge index ready: {} document(s)", indexed.indexed);
+            if no_tui {
+                Ok(())
+            } else {
+                launch_tui(root)
+            }
+        }
     }
+}
+
+fn corpus_manifest_path(corpus: &Path) -> Result<PathBuf> {
+    let manifest = if corpus.is_dir() {
+        corpus.join("corpus.json")
+    } else {
+        corpus.to_path_buf()
+    };
+    if !manifest.is_file() {
+        bail!(
+            "could not find corpus manifest {}; pass a corpus directory or corpus.json",
+            manifest.display()
+        );
+    }
+    Ok(manifest)
+}
+
+fn launch_tui(root: PathBuf) -> Result<()> {
+    let repository = LocalRepository::open(&root)?;
+    let workspace = repository.workspace()?;
+    let artifacts = repository.artifacts()?;
+    let findings = repository.findings()?;
+    let trace = findings
+        .first()
+        .map(|finding| repository.trace_for(finding))
+        .transpose()?;
+    let view = loremesh_tui::DashboardView::from_domain(
+        &workspace.name,
+        &artifacts,
+        &findings,
+        trace.as_ref(),
+    );
+    let mut handler = TuiCommandHandler::new(root);
+    loremesh_tui::run(&view, &mut handler).context("terminal dashboard failed")
 }
 
 fn run_index(command: IndexCommand) -> Result<()> {

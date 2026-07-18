@@ -32,10 +32,10 @@ cd target/test-corpora/fixture-workspace
 Import a generated scale corpus from an initialized workspace with the matching explicit opt-in:
 
 ```console
-cargo run -p loremesh -- corpus import --allow-large ../scale-100m/corpus.json
+loremesh corpus open ../scale-100m
 ```
 
-Large import mode remains bounded and performs no network access or imported-code execution.
+This discovers the manifest, applies bounded local limits, imports the corpus, builds the disposable knowledge index, and opens the TUI. Use `--no-tui` for automation. Large import mode remains bounded and performs no network access or imported-code execution.
 
 Inside the TUI, press `/` to enter a command, `Tab` or `Shift-Tab` to move focus,
 Page Up/Down or Home/End to scroll results, and `q`, `/quit`, or `/exit` to leave.
