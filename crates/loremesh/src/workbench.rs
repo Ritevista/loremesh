@@ -369,10 +369,7 @@ impl TuiCommandHandler {
                 ))
             }
             BrowserCommand::Search(query) => {
-                let document = self
-                    .code_document
-                    .as_ref()
-                    .context("no code document is open")?;
+                let document = self.code_document.as_ref().context("no document is open")?;
                 let matches = document.search(query, false);
                 let summary = matches
                     .iter()
@@ -380,8 +377,16 @@ impl TuiCommandHandler {
                     .collect::<Vec<_>>()
                     .join("\n");
                 Ok((
-                    format!("Found {} match(es)", matches.len()),
-                    Some(text_view("Search results", summary)),
+                    format!(
+                        "Found {} match(es){}",
+                        matches.len(),
+                        if summary.is_empty() {
+                            String::new()
+                        } else {
+                            format!(": {}", summary.replace('\n', ", "))
+                        }
+                    ),
+                    None,
                 ))
             }
         }
@@ -760,10 +765,11 @@ mod tests {
             .browser_command(&BrowserCommand::Open("notes.md".into()))
             .expect("open Markdown");
         assert!(view.expect("Markdown view").paragraphs[0].contains("A ──▶ B"));
-        let (message, _) = workbench
+        let (message, content) = workbench
             .browser_command(&BrowserCommand::Search("notes".into()))
             .expect("search open document");
-        assert_eq!(message, "Found 1 match(es)");
+        assert_eq!(message, "Found 1 match(es): line 1, column 3");
+        assert!(content.is_none());
     }
 
     #[test]

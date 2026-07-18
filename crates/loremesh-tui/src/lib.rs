@@ -278,6 +278,7 @@ pub enum ShellCommand {
 pub enum InputMode {
     LoreMesh,
     Shell,
+    Find,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -329,6 +330,7 @@ pub enum SlashCommand {
     },
     Shell(ShellCommand),
     Browser(BrowserCommand),
+    KnowledgeSearch(String),
     Demo(DemoKind),
     Quit,
 }
@@ -366,7 +368,8 @@ pub fn parse_command(input: &str) -> Result<SlashCommand, CommandError> {
         }
         "/open" => one_rest(parts, "usage: /open <path>")
             .map(|path| SlashCommand::Browser(BrowserCommand::Open(path))),
-        "/search" => one_rest(parts, "usage: /search <text>")
+        "/search" => one_rest(parts, "usage: /search <text>").map(SlashCommand::KnowledgeSearch),
+        "/find" => one_rest(parts, "usage: /find <text>")
             .map(|query| SlashCommand::Browser(BrowserCommand::Search(query))),
         "/quit" | "/exit" => no_args(parts, SlashCommand::Quit),
         "/save" | "/export" => parse_save(parts),
@@ -561,6 +564,14 @@ pub struct CommandResponse {
 pub trait CommandHandler {
     fn execute(&mut self, command: &SlashCommand, active: &ViewContent) -> CommandResponse;
 
+    fn activate(&mut self, _active: &ViewContent, row: usize) -> CommandResponse {
+        CommandResponse {
+            message: format!("Selected row {}", row.saturating_add(1)),
+            content: None,
+            input_mode: None,
+        }
+    }
+
     fn poll(&mut self) -> Option<CommandResponse> {
         None
     }
@@ -579,6 +590,7 @@ pub struct ShellState {
     history_cursor: Option<usize>,
     should_quit: bool,
     custom: Option<ViewContent>,
+    back_stack: Vec<ViewContent>,
     primary_scroll: u16,
     timeline_scroll: u16,
     selected_row: usize,
@@ -598,6 +610,7 @@ impl Default for ShellState {
             history_cursor: None,
             should_quit: false,
             custom: None,
+            back_stack: Vec::new(),
             primary_scroll: 0,
             timeline_scroll: 0,
             selected_row: 0,
@@ -646,10 +659,16 @@ impl ShellState {
                 self.input = "/".into();
             }
             KeyCode::Char('q') if self.focus != Focus::Input => self.should_quit = true,
+            KeyCode::Char('b') if self.focus == Focus::Primary => self.go_back(),
+            KeyCode::Char('f')
+                if self.focus == Focus::Primary
+                    && self.content(view).table.is_none()
+                    && self.content(view).chart.is_none() =>
+            {
+                self.begin_find();
+            }
             KeyCode::Esc if self.focus == Focus::Input => {
-                self.input.clear();
-                self.focus = Focus::Primary;
-                self.history_cursor = None;
+                self.leave_input();
             }
             KeyCode::Esc => self.focus = Focus::Primary,
             KeyCode::PageUp => {
@@ -691,10 +710,7 @@ impl ShellState {
             KeyCode::Enter
                 if self.focus == Focus::Primary && self.content(view).table.is_some() =>
             {
-                self.push_message(format!(
-                    "Selected table row {}",
-                    self.selected_row.saturating_add(1)
-                ));
+                self.activate_selection(view, handler);
             }
             KeyCode::Char('e') if self.focus == Focus::Primary => {
                 self.focus = Focus::Input;
@@ -720,6 +736,15 @@ impl ShellState {
         self.input.clear();
         self.history_cursor = None;
         if input.is_empty() {
+            return;
+        }
+        if self.input_mode == InputMode::Find {
+            self.input_mode = InputMode::LoreMesh;
+            let response = handler.execute(
+                &SlashCommand::Browser(BrowserCommand::Search(input)),
+                self.content(view),
+            );
+            self.apply_response(response);
             return;
         }
         if self.input_mode == InputMode::Shell {
@@ -796,11 +821,47 @@ impl ShellState {
     }
 
     fn show_content(&mut self, content: ViewContent) {
+        if let Some(current) = self.custom.take() {
+            self.back_stack.push(current);
+        }
         self.custom = Some(content);
         self.active = ViewKind::Custom;
         self.focus = Focus::Primary;
         self.primary_scroll = 0;
         self.selected_row = 0;
+    }
+
+    fn go_back(&mut self) {
+        if let Some(previous) = self.back_stack.pop() {
+            self.custom = Some(previous);
+            self.active = ViewKind::Custom;
+            self.focus = Focus::Primary;
+            self.primary_scroll = 0;
+            self.selected_row = 0;
+            self.push_message("Returned to previous view");
+        } else {
+            self.push_message("No previous view");
+        }
+    }
+
+    fn begin_find(&mut self) {
+        self.input_mode = InputMode::Find;
+        self.input.clear();
+        self.focus = Focus::Input;
+    }
+
+    fn activate_selection<H: CommandHandler>(&mut self, view: &DashboardView, handler: &mut H) {
+        let response = handler.activate(self.content(view), self.selected_row);
+        self.apply_response(response);
+    }
+
+    fn leave_input(&mut self) {
+        self.input.clear();
+        if self.input_mode == InputMode::Find {
+            self.input_mode = InputMode::LoreMesh;
+        }
+        self.focus = Focus::Primary;
+        self.history_cursor = None;
     }
 
     fn maximum_primary_scroll(&self, view: &DashboardView) -> u16 {
@@ -861,6 +922,7 @@ impl ShellState {
         while self.messages.len() > MAX_MESSAGES {
             self.messages.pop_front();
         }
+        self.timeline_scroll = self.maximum_timeline_scroll();
     }
 
     fn history_previous(&mut self) {
@@ -906,7 +968,7 @@ fn text_content(title: &str, text: &str) -> ViewContent {
 fn help_content() -> ViewContent {
     text_content(
         "LoreMesh command reference",
-        "LOREMESH COMMAND REFERENCE\n\nNAVIGATION\n/help\n  Show this complete reference.\n/artifacts\n  Show imported artifacts.\n/findings\n  Show findings.\n/trace\n  Show evidence lineage.\n\nDEMONSTRATIONS\n/demo table\n/demo chart\n/demo markdown\n/demo code\n/demo shell\n  Open deterministic capability previews; no files, network, model, or shell execution required.\n\nTABLES\n/table load <workspace-relative.csv>\n/table refresh\n/table save <workspace-relative.csv>\n/table sort <column> <asc|desc>\n/table filter <column> <text>\n/table search <text>\n/table columns <column,...>\n/table reset\n\nCHARTS\n/chart <bar|hbar|line|pie> <label-column> <value-column>\n  Requires a loaded table. Example: /chart hbar name duration\n\nFILES AND MARKDOWN\n/browse [workspace-relative-directory]\n/open <workspace-relative-file>\n/search <text>\n\nLOCAL SHELL\n/shell\n  Start a persistent shell in the workspace. Type commands normally in the bottom composer.\n/exit or Ctrl-D\n  Close the shell and return to LoreMesh command mode.\nCtrl-C\n  Interrupt the current shell command. PgUp/PgDn and Home/End scroll its bounded timeline output.\n  The shell has your OS permissions and may access files or networks. LoreMesh does not retain its command history.\n\nREPORTS\n/save current --format <md|markdown-mermaid|markdown-d2|csv|html|png> [--output <path>]\n/export current --format <format> [--output <path>]\n\nSERVICES\n/services\n/model\n/context\n/compact\n/clear\n\nEXIT\n/quit\n/exit\n  Outside input, q exits. In shell mode /exit returns to LoreMesh and /quit exits the app. Esc changes focus and never exits.",
+        "LOREMESH COMMAND REFERENCE\n\nNAVIGATION\n/help\n  Show this complete reference.\n/artifacts\n  Show imported artifacts.\n/findings\n  Show findings.\n/trace\n  Show evidence lineage.\n/search <text>\n  Search canonical knowledge; select with Up/Down and open with Enter.\n\nDEMONSTRATIONS\n/demo table\n/demo chart\n/demo markdown\n/demo code\n/demo shell\n  Open deterministic capability previews; no files, network, model, or shell execution required.\n\nTABLES\n/table load <workspace-relative.csv>\n/table refresh\n/table save <workspace-relative.csv>\n/table sort <column> <asc|desc>\n/table filter <column> <text>\n/table search <text>\n/table columns <column,...>\n/table reset\n\nCHARTS\n/chart <bar|hbar|line|pie> <label-column> <value-column>\n  Requires a loaded table. Example: /chart hbar name duration\n\nFILES AND MARKDOWN\n/browse [workspace-relative-directory]\n/open <workspace-relative-file>\n/find <text>\n  Search within the currently opened file.\n\nLOCAL SHELL\n/shell\n  Start a persistent shell in the workspace. Type commands normally in the bottom composer.\n/exit or Ctrl-D\n  Close the shell and return to LoreMesh command mode.\nCtrl-C\n  Interrupt the current shell command. PgUp/PgDn and Home/End scroll its bounded timeline output.\n  The shell has your OS permissions and may access files or networks. LoreMesh does not retain its command history.\n\nREPORTS\n/save current --format <md|markdown-mermaid|markdown-d2|csv|html|png> [--output <path>]\n/export current --format <format> [--output <path>]\n\nSERVICES\n/services\n/model\n/context\n/compact\n/clear\n\nEXIT\n/quit\n/exit\n  Outside input, q exits. In shell mode /exit returns to LoreMesh and /quit exits the app. Esc changes focus and never exits.",
     )
 }
 
@@ -999,6 +1061,8 @@ fn draw(frame: &mut ratatui::Frame<'_>, view: &DashboardView, state: &ShellState
             "{} {}",
             if state.input_mode == InputMode::Shell {
                 "$"
+            } else if state.input_mode == InputMode::Find {
+                "?"
             } else {
                 ">"
             },
@@ -1008,6 +1072,8 @@ fn draw(frame: &mut ratatui::Frame<'_>, view: &DashboardView, state: &ShellState
         .block(focus_block(
             if state.input_mode == InputMode::Shell {
                 "Shell"
+            } else if state.input_mode == InputMode::Find {
+                "Find in document"
             } else {
                 "Command"
             },
@@ -1141,7 +1207,11 @@ fn draw_history(frame: &mut ratatui::Frame<'_>, area: Rect, state: &ShellState) 
 
 fn contextual_shortcuts(state: &ShellState, view: &DashboardView) -> String {
     if state.focus == Focus::Input {
-        return "Enter run · ↑↓ history · Esc primary · Tab focus · /help".into();
+        return if state.input_mode == InputMode::Find {
+            "Enter find · Esc cancel · type plain search text".into()
+        } else {
+            "Enter run · ↑↓ history · Esc primary · Tab focus · /help".into()
+        };
     }
     if state.focus == Focus::Timeline {
         return "PgUp/PgDn Home/End timeline · Tab focus · / command · q quit".into();
@@ -1152,7 +1222,7 @@ fn contextual_shortcuts(state: &ShellState, view: &DashboardView) -> String {
     } else if active.chart.is_some() {
         "e export · PgUp/PgDn · Tab focus · / commands · q quit".into()
     } else {
-        "PgUp/PgDn Home/End scroll · / command · e export · Tab focus · q quit".into()
+        "PgUp/PgDn scroll · f find · b back · e export · Tab focus · q quit".into()
     }
 }
 
@@ -1498,6 +1568,16 @@ mod tests {
             parse_command("/demo markdown"),
             Ok(SlashCommand::Demo(DemoKind::Markdown))
         );
+        assert_eq!(
+            parse_command("/search retry policy"),
+            Ok(SlashCommand::KnowledgeSearch("retry policy".into()))
+        );
+        assert_eq!(
+            parse_command("/find retry"),
+            Ok(SlashCommand::Browser(BrowserCommand::Search(
+                "retry".into()
+            )))
+        );
     }
 
     #[test]
@@ -1701,6 +1781,51 @@ mod tests {
             &mut handler,
         );
         assert_eq!(state.focus, Focus::Primary);
+    }
+
+    #[test]
+    fn document_find_is_direct_and_back_restores_search_results() {
+        let mut state = ShellState::default();
+        let view = view();
+        let mut handler = Handler;
+        state.show_content(ViewContent {
+            title: "Knowledge search".into(),
+            paragraphs: Vec::new(),
+            table: Some(ViewTable {
+                columns: vec!["Title".into()],
+                rows: vec![vec!["Architecture".into()]],
+            }),
+            chart: None,
+            mermaid: None,
+            d2: None,
+        });
+        state.show_content(text_content("Architecture", "document body"));
+        state.handle_key(
+            KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE),
+            &view,
+            &mut handler,
+        );
+        assert_eq!(state.input_mode, InputMode::Find);
+        assert_eq!(state.focus, Focus::Input);
+        state.input = "body".into();
+        state.handle_key(
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+            &view,
+            &mut handler,
+        );
+        assert_eq!(state.input_mode, InputMode::LoreMesh);
+        assert_eq!(state.content(&view).title, "Architecture");
+        assert!(state
+            .messages
+            .back()
+            .is_some_and(|message| message.contains("Browser(Search(\"body\"))")));
+        assert_eq!(state.timeline_scroll, state.maximum_timeline_scroll());
+        state.handle_key(
+            KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE),
+            &view,
+            &mut handler,
+        );
+        assert_eq!(state.content(&view).title, "Knowledge search");
     }
 
     #[test]
