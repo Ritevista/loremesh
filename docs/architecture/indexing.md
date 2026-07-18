@@ -42,3 +42,5 @@ loremesh-relationship -> feedback: "stable target"
 Tantivy lives in `loremesh-storage` as the first `LexicalIndex` adapter. The core port contains no Tantivy types. SQLite remains operational/canonical metadata storage, not the full-text representation. Index state lives below `.loremesh/indexes`; object bytes remain below `.loremesh/objects`.
 
 Corpus import is synchronous and bounded in this foundation. Large-corpus streaming, concurrency, background rebuilds, and resource telemetry require measured need and explicit limits before introduction.
+
+A future provider implements a synchronous, vendor-neutral boundary shaped like `analyze(RelationshipAnalysisInput) -> Result<Vec<RelationshipCandidate>, RelationshipProviderError>` and declares a stable provider name. Subprocess, timeout, protocol, and cancellation behavior stays in the adapter/composition layer described by ADR 0005; it is not encoded into the relationship entity. An eventual Graphify importer therefore translates exports to candidates, and feedback continues to target accepted LoreMesh relationship IDs.

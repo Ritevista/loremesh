@@ -9,6 +9,10 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+pub mod corpus;
+pub mod index;
+pub mod relationship;
+
 /// Domain validation and invariant failures.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum DomainError {
@@ -94,6 +98,8 @@ identifier!(TraceNodeId, "nod");
 identifier!(TraceEdgeId, "edg");
 identifier!(ReportId, "rpt");
 identifier!(SavedViewId, "viw");
+identifier!(RelationshipId, "rel");
+identifier!(CodeReferenceId, "cod");
 
 /// Local workspace descriptor.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -214,13 +220,26 @@ impl Artifact {
         name: impl Into<String>,
         byte_len: u64,
     ) -> Result<Self, DomainError> {
+        Self::with_media_type(id, snapshot_id, name, "text/markdown", byte_len)
+    }
+
+    /// Creates a validated artifact with an explicit media type.
+    pub fn with_media_type(
+        id: ArtifactId,
+        snapshot_id: SnapshotId,
+        name: impl Into<String>,
+        media_type: impl Into<String>,
+        byte_len: u64,
+    ) -> Result<Self, DomainError> {
         let name = name.into();
+        let media_type = media_type.into();
         non_blank("artifact name", &name)?;
+        non_blank("artifact media type", &media_type)?;
         Ok(Self {
             id,
             snapshot_id,
             name,
-            media_type: "text/markdown".into(),
+            media_type,
             byte_len,
         })
     }
@@ -382,6 +401,7 @@ pub enum FeedbackTarget {
     Finding(FindingId),
     Claim(ClaimId),
     TraceEdge(TraceEdgeId),
+    Relationship(RelationshipId),
 }
 
 /// Scoped correction or annotation that does not mutate its target.

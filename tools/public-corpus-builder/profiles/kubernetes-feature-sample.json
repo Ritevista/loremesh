@@ -1,0 +1,56 @@
+{
+  "name": "kubernetes-feature-sample",
+  "version": "1",
+  "licenses": [
+    {
+      "project": "kubernetes/enhancements",
+      "license": "Apache-2.0",
+      "url": "https://github.com/kubernetes/enhancements/blob/996e7d41387c4937b0b976800718d067cd1bdd16/LICENSE"
+    },
+    {
+      "project": "kubernetes/kubernetes",
+      "license": "Apache-2.0",
+      "url": "https://github.com/kubernetes/kubernetes/blob/f28b4c9efbca5c5c0af716d9f2d5702667ee8a45/LICENSE"
+    }
+  ],
+  "repositories": {
+    "enhancements": {
+      "url": "https://github.com/kubernetes/enhancements.git",
+      "revision": "996e7d41387c4937b0b976800718d067cd1bdd16"
+    },
+    "kubernetes": {
+      "url": "https://github.com/kubernetes/kubernetes.git",
+      "revision": "f28b4c9efbca5c5c0af716d9f2d5702667ee8a45"
+    }
+  },
+  "features": [
+    {
+      "id": "kep-753",
+      "title": "Sidecar Containers",
+      "kep_path": "keps/sig-node/753-sidecar-containers",
+      "tracking_issue": 753,
+      "code_path": "pkg/kubelet/kuberuntime/kuberuntime_container.go"
+    },
+    {
+      "id": "kep-1287",
+      "title": "In-place Update of Pod Resources",
+      "kep_path": "keps/sig-node/1287-in-place-update-pod-resources",
+      "tracking_issue": 1287,
+      "code_path": "pkg/kubelet/status/generate.go"
+    },
+    {
+      "id": "kep-2579",
+      "title": "Pod Security Admission",
+      "kep_path": "keps/sig-auth/2579-psp-replacement",
+      "tracking_issue": 2579,
+      "code_path": "staging/src/k8s.io/pod-security-admission/policy/registry.go"
+    },
+    {
+      "id": "kep-3294",
+      "title": "Cross-namespace Volume Data Sources",
+      "kep_path": "keps/sig-storage/3294-provision-volumes-from-cross-namespace-snapshots",
+      "tracking_issue": 3294,
+      "code_path": "pkg/volume/util/operationexecutor/operation_generator.go"
+    }
+  ]
+}

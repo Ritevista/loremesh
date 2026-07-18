@@ -2,7 +2,7 @@
 set -euo pipefail
 
 core_manifest="crates/loremesh-core/Cargo.toml"
-for forbidden in ratatui crossterm rusqlite tokio reqwest sqlx graphify; do
+for forbidden in ratatui crossterm rusqlite tantivy tokio reqwest sqlx graphify; do
   if rg -n "^${forbidden}[[:space:]]*=" "$core_manifest"; then
     echo "forbidden core dependency: ${forbidden}" >&2
     exit 1

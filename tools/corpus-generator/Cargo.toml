@@ -1,0 +1,20 @@
+[package]
+name = "loremesh-corpus-gen"
+description = "Deterministic scalable synthetic engineering corpus generator"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+loremesh-core = { version = "0.1.0", path = "../../crates/loremesh-core" }
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

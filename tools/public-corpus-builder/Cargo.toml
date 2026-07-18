@@ -1,0 +1,19 @@
+[package]
+name = "loremesh-public-corpus"
+description = "Explicit pinned public engineering corpus builder for LoreMesh"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+loremesh-core = { version = "0.1.0", path = "../../crates/loremesh-core" }
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

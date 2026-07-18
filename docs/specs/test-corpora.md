@@ -22,7 +22,7 @@ A contributor runs `just corpus-fixture` in CI, explicitly runs `just corpus-pub
 
 ## Functional requirements
 
-The tiny fixture contains fictional documents, issues, a small Rust service, code references, images/placeholders, expected diagnostics, and known relationships. Public building uses immutable repository revisions, records URLs/licenses, transforms 3–5 curated Kubernetes features into the generic manifest, writes below `target/test-corpora`, and never runs in ordinary tests. The scale generator accepts seed, counts, relationships, target size, and output; refuses unsafe/existing output; prints the target and requested size before generation; and produces logically equivalent output for equal version/arguments.
+The tiny fixture contains fictional documents, issues, a small Rust service, code references, images/placeholders, expected diagnostics, and known relationships. The initial public profile transforms KEP 753, 1287, 2579, and 3294 from `kubernetes/enhancements` commit `996e7d41387c4937b0b976800718d067cd1bdd16` and code from Kubernetes v1.34.0 commit `f28b4c9efbca5c5c0af716d9f2d5702667ee8a45`; both upstreams are Apache-2.0 and their immutable license URLs are recorded in the profile/output. It writes below `target/test-corpora` and never runs in ordinary tests. The scale generator accepts seed, counts, relationships, target size, output, and an optional deliberate-quality-problems mode; it refuses unsafe/existing output, prints the target and requested size before generation, and produces logically equivalent output for equal version/arguments.
 
 ## Domain model
 
