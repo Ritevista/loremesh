@@ -845,9 +845,12 @@ mod tests {
         let temporary = tempfile::tempdir().expect("temporary directory");
         let mut session = PtySession::start(temporary.path()).expect("start PTY shell");
 
-        assert_eq!(
-            session.child.try_wait().expect("query PTY child status"),
-            None,
+        assert!(
+            session
+                .child
+                .try_wait()
+                .expect("query PTY child status")
+                .is_none(),
             "the default Windows shell should remain interactive",
         );
         session.resize(40, 100).expect("resize PTY");
