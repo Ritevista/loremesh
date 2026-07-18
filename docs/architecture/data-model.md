@@ -4,4 +4,6 @@ Typed identifiers prevent accidental cross-entity references. A workspace contai
 
 Feedback points to a target and carries `Personal` or `Organization` scope. `SourceDerived` is valid for knowledge created from sources but invalid for feedback authorship. Reports contain sections composed of paragraphs, tables, and metrics. Saved views store a name and explicit scope only in the foundation.
 
+A LoreMesh relationship connects typed canonical references using an extensible validated relation name, generic origin, verification status, optional evidence, and optional external provenance. External IDs never determine its identity. Feedback may target the LoreMesh relationship so human review survives provider replacement. Index documents and relationship candidates are derived boundary objects, not canonical knowledge.
+
 Identifiers use stable prefixed SHA-256-derived strings for imported content and deterministic demo entities. User-authored production IDs may later use a monotonic generator behind an injected port. Timestamps are stored only when externally meaningful and are injected; the foundation avoids them for deterministic state.

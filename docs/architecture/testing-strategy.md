@@ -4,4 +4,6 @@ Pure unit tests cover identifiers, evidence ranges, scope rules, traces, and rep
 
 Tests are offline, deterministic, order-independent, license-safe, and may use `expect` for diagnostic quality. Time and ID generation must be injected when introduced. Temporary paths never escape their owning directory. Every defect fix adds a regression test.
 
+The committed tiny corpus covers ordinary CI. Pinned public-corpus downloads and 100 MB–2 GB generated corpora are explicit manual workflows under `target/test-corpora`; normal CI validates their profiles/generators without network or large output.
+
 CI runs formatting, check, Clippy with denied warnings, all tests, doctests, docs with warnings denied, architecture rules, dependency policy, audit, unused-dependency analysis, and coverage generation. Coverage is published without a threshold until a meaningful baseline exists; later policy should prevent unexplained regression. Linux is required; macOS and Windows run the portable build/test subset.

@@ -6,6 +6,8 @@ Processing lineage answers “what actions produced this derived object?” It u
 
 The two lineages may meet at evidence but are not interchangeable. A processing record cannot substitute for evidence, and a source reference does not claim how a result was produced. Trace path validation rejects missing nodes, cycles, and disconnected claimed paths.
 
+Current-source state is also not historical evidence: when source snapshot B supersedes snapshot A, an older finding remains attached to A and may be reported as stale evidence. Index rebuilds always project both identity and current-state metadata explicitly; they never rewrite the finding.
+
 ```d2
 direction: right
 

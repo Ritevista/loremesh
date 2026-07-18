@@ -12,3 +12,7 @@ Specifications define observable behaviour and acceptance tests. `Status: Accept
 | [Interactive workbench shell](interactive-workbench-shell.md) | Accepted |
 | [Data workbench](data-workbench.md) | Accepted |
 | [Code and rich Markdown browser](code-and-markdown-browser.md) | Accepted |
+| [Knowledge corpus](knowledge-corpus.md) | Accepted |
+| [Corpus manifest](corpus-manifest.md) | Accepted |
+| [Lexical index](lexical-index.md) | Accepted |
+| [Test corpora](test-corpora.md) | Accepted |
