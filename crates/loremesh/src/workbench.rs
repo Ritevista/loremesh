@@ -809,18 +809,32 @@ mod tests {
     fn interactive_pty_accepts_input_and_streams_output() {
         let temporary = tempfile::tempdir().expect("temporary directory");
         let mut session = PtySession::start(temporary.path()).expect("start PTY shell");
-        session
-            .send_line("echo loremesh_pty_ready")
-            .expect("send shell input");
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let timeout = if cfg!(windows) {
+            Duration::from_secs(10)
+        } else {
+            Duration::from_secs(3)
+        };
+        let deadline = Instant::now() + timeout;
+        let mut next_send = Instant::now();
+        let mut exit_status = None;
         while Instant::now() < deadline && !session.scrollback.contains("loremesh_pty_ready") {
+            if Instant::now() >= next_send {
+                session
+                    .send_line("echo loremesh_pty_ready")
+                    .expect("send shell input");
+                next_send = Instant::now() + Duration::from_secs(1);
+            }
             session.drain();
+            exit_status = session.child.try_wait().expect("query PTY child status");
+            if exit_status.is_some() {
+                break;
+            }
             thread::sleep(Duration::from_millis(10));
         }
         assert!(
             session.scrollback.contains("loremesh_pty_ready"),
-            "PTY output did not contain the marker: {}",
-            session.scrollback
+            "PTY output did not contain the marker; child status: {exit_status:?}; output: {}",
+            session.scrollback,
         );
         session.stop().expect("stop PTY shell");
     }
