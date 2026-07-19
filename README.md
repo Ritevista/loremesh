@@ -62,6 +62,11 @@ opens the full multiline command reference there. Use `/demo table`, `/demo char
 `/demo markdown`, `/demo code`, or `/demo shell` to preview capabilities without
 creating input files or executing a command.
 
+Investigations are first-class and persistent. They let you collect canonical
+references from search, inspect evidence and lineage, attach local notes or
+feedback, save the investigation, reopen it later, and export a self-contained
+HTML report.
+
 `/demo chart` shows the responsive multi-series chart renderer. Structured tables
 and charts use the full result width, semantic focus/status colors, stable series
 colors, labels and values that remain meaningful without color, and a compact
@@ -76,7 +81,7 @@ is not automatically saved, and is never treated as evidence.
 
 ## Principles
 
-- Imported content stays local unless a user explicitly configures a future network adapter.
+- Imported content stays local unless a user explicitly configures a future external integration or adapter.
 - Source snapshots are authoritative; artifacts, evidence, findings, accepted relationships, traces, and feedback have explicit canonical lifecycles. Indexes and external-engine candidates are replaceable derivatives.
 - Findings carry evidence and separate source lineage from processing lineage.
 - Personal feedback is isolated from organization knowledge.

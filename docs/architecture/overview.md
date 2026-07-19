@@ -9,7 +9,7 @@ flowchart TB
     storage["loremesh-storage<br/>filesystem and SQLite adapter"]
     report["loremesh-report<br/>report model and exporters"]
     core["loremesh-core<br/>domain and ports"]
-    future["future external adapters<br/>subprocess or explicit network"]
+    future["future external adapters<br/>subprocess or networked integrations"]
 
     bin --> tui
     bin --> storage

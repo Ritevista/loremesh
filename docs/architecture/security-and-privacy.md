@@ -1,6 +1,6 @@
 # Security and privacy
 
-LoreMesh defaults to offline operation and has no telemetry. Future network access requires a named adapter, explicit configuration, and user intent. Source content must not leave the machine merely because a provider is configured.
+LoreMesh defaults to offline operation and has no telemetry. Future external integrations require explicit configuration and user intent. Source content must not leave the machine merely because a provider is configured.
 
 Imported bytes are untrusted. The foundation canonicalizes inputs, rejects non-files and oversized files, copies bytes into content-addressed objects, validates evidence ranges, prevents workspace-relative traversal, and escapes untrusted report HTML. Exports use logical artifact names rather than absolute host paths. Errors and tracing events include identifiers and operations, not source content or credentials.
 
