@@ -1114,7 +1114,6 @@ fn help_content() -> ViewContent {
     );
     content
 }
-
 fn is_open_document(content: &ViewContent) -> bool {
     content.paragraphs.first().is_some_and(|paragraph| {
         paragraph.starts_with("Path: ") || paragraph.starts_with("Artifact: ")
