@@ -5,8 +5,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use loremesh_core::{
-    Artifact, ArtifactId, Finding, SnapshotId, Source, SourceId, SourceSnapshot, Trace, Workspace,
-    WorkspaceId,
+    investigation::{EvidenceStatus, Investigation, InvestigationItem},
+    relationship::CodeReference,
+    Artifact, ArtifactId, Feedback, Finding, SnapshotId, Source, SourceId, SourceSnapshot, Trace,
+    Workspace, WorkspaceId,
 };
 use rusqlite::{params, Connection, OptionalExtension};
 use sha2::{Digest, Sha256};
@@ -207,6 +209,12 @@ impl LocalRepository {
         transaction.execute("INSERT OR IGNORE INTO snapshots (id, source_id, digest, byte_len) VALUES (?1, ?2, ?3, ?4)", params![snapshot.id.as_str(), snapshot.source_id.as_str(), snapshot.digest, snapshot.byte_len]).map_err(|source| db("recording snapshot", source))?;
         let inserted = transaction.execute("INSERT OR IGNORE INTO artifacts (id, snapshot_id, name, media_type, byte_len) VALUES (?1, ?2, ?3, ?4, ?5)", params![artifact.id.as_str(), artifact.snapshot_id.as_str(), artifact.name, artifact.media_type, artifact.byte_len]).map_err(|source| db("recording artifact", source))? == 1;
         transaction
+            .execute(
+                "INSERT OR REPLACE INTO current_snapshots (source_id, snapshot_id) VALUES (?1, ?2)",
+                params![source.id.as_str(), snapshot.id.as_str()],
+            )
+            .map_err(|source| db("recording current snapshot", source))?;
+        transaction
             .commit()
             .map_err(|source| db("committing import", source))?;
         Ok(ImportResult {
@@ -337,6 +345,170 @@ impl LocalRepository {
         serde_json::from_str(&body).map_err(|source| ser("deserializing trace", source))
     }
 
+    /// Stores an investigation after validating every canonical reference.
+    pub fn save_investigation_record(
+        &self,
+        investigation: &Investigation,
+    ) -> Result<(), StorageError> {
+        for item in &investigation.items {
+            self.validate_investigation_item(item)?;
+        }
+        let body = serde_json::to_string(investigation)
+            .map_err(|source| ser("serializing investigation", source))?;
+        let scope = match investigation.scope {
+            loremesh_core::investigation::InvestigationScope::Personal => "personal",
+            loremesh_core::investigation::InvestigationScope::Organization => "organization",
+        };
+        self.connection
+            .execute(
+                "INSERT OR REPLACE INTO investigations (id, scope, body) VALUES (?1, ?2, ?3)",
+                params![investigation.id.as_str(), scope, body],
+            )
+            .map_err(|source| db("recording investigation", source))?;
+        Ok(())
+    }
+
+    /// Lists investigations in stable identifier order.
+    pub fn investigations(&self) -> Result<Vec<Investigation>, StorageError> {
+        load_json_rows(
+            &self.connection,
+            "SELECT body FROM investigations ORDER BY id",
+            "loading investigations",
+        )
+    }
+
+    /// Loads one investigation by stable ID.
+    pub fn investigation(
+        &self,
+        id: &loremesh_core::InvestigationId,
+    ) -> Result<Investigation, StorageError> {
+        let body: Option<String> = self
+            .connection
+            .query_row(
+                "SELECT body FROM investigations WHERE id = ?1",
+                [id.as_str()],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|source| db("loading investigation", source))?;
+        serde_json::from_str(&body.ok_or_else(|| {
+            StorageError::Validation(format!("investigation does not exist: {id}"))
+        })?)
+        .map_err(|source| ser("deserializing investigation", source))
+    }
+
+    fn validate_investigation_item(&self, item: &InvestigationItem) -> Result<(), StorageError> {
+        let valid = match item {
+            InvestigationItem::Artifact(id) => self.row_exists("artifacts", id.as_str())?,
+            InvestigationItem::Finding(id) => self.row_exists("findings", id.as_str())?,
+            InvestigationItem::Claim(id) => self
+                .findings()?
+                .iter()
+                .any(|finding| finding.claims.iter().any(|claim| claim.id == *id)),
+            InvestigationItem::Evidence(evidence) => {
+                self.row_exists("artifacts", evidence.artifact.artifact_id.as_str())?
+            }
+            InvestigationItem::Relationship(id) => self.row_exists("relationships", id.as_str())?,
+            InvestigationItem::Trace(id) => self.row_exists("traces", id.as_str())?,
+            InvestigationItem::CodeReference(id) => {
+                self.row_exists("code_references", id.as_str())?
+            }
+        };
+        if valid {
+            Ok(())
+        } else {
+            Err(StorageError::Validation(format!(
+                "investigation references unknown canonical object: {item:?}"
+            )))
+        }
+    }
+
+    fn row_exists(&self, table: &str, id: &str) -> Result<bool, StorageError> {
+        let sql = format!("SELECT EXISTS(SELECT 1 FROM {table} WHERE id = ?1)");
+        self.connection
+            .query_row(&sql, [id], |row| row.get(0))
+            .map_err(|source| db("validating investigation reference", source))
+    }
+
+    /// Resolves one artifact by canonical ID.
+    pub fn artifact(&self, id: &ArtifactId) -> Result<Option<Artifact>, StorageError> {
+        Ok(self
+            .artifacts()?
+            .into_iter()
+            .find(|artifact| artifact.id == *id))
+    }
+
+    /// Resolves the source and immutable snapshot for an artifact.
+    pub fn artifact_lineage(
+        &self,
+        artifact: &Artifact,
+    ) -> Result<(SourceSnapshot, Source), StorageError> {
+        let (source_id, digest, byte_len): (String, String, u64) = self
+            .connection
+            .query_row(
+                "SELECT source_id, digest, byte_len FROM snapshots WHERE id = ?1",
+                [artifact.snapshot_id.as_str()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .map_err(|source| db("loading artifact snapshot", source))?;
+        let source_id = SourceId::parse(source_id)?;
+        let location: String = self
+            .connection
+            .query_row(
+                "SELECT location FROM sources WHERE id = ?1",
+                [source_id.as_str()],
+                |row| row.get(0),
+            )
+            .map_err(|source| db("loading artifact source", source))?;
+        Ok((
+            SourceSnapshot::new(
+                artifact.snapshot_id.clone(),
+                source_id.clone(),
+                digest,
+                byte_len,
+            )?,
+            Source::local(source_id, location)?,
+        ))
+    }
+
+    /// Classifies immutable evidence relative to the source's current snapshot.
+    pub fn evidence_status(
+        &self,
+        evidence: &loremesh_core::EvidenceReference,
+    ) -> Result<EvidenceStatus, StorageError> {
+        let Some(artifact) = self.artifact(&evidence.artifact.artifact_id)? else {
+            return Ok(EvidenceStatus::Missing);
+        };
+        let current: Option<String> = self.connection.query_row(
+            "SELECT current_snapshots.snapshot_id FROM current_snapshots JOIN snapshots ON snapshots.source_id = current_snapshots.source_id WHERE snapshots.id = ?1",
+            [artifact.snapshot_id.as_str()],
+            |row| row.get(0),
+        ).optional().map_err(|source| db("classifying evidence snapshot", source))?;
+        Ok(match current.as_deref() {
+            Some(id) if id == artifact.snapshot_id.as_str() => EvidenceStatus::Current,
+            Some(_) => EvidenceStatus::Historical,
+            None => EvidenceStatus::Missing,
+        })
+    }
+
+    /// Lists persisted feedback in stable identifier order.
+    pub fn feedback(&self) -> Result<Vec<Feedback>, StorageError> {
+        load_json_rows(
+            &self.connection,
+            "SELECT body FROM feedback ORDER BY id",
+            "loading feedback",
+        )
+    }
+
+    /// Lists canonical code references in stable identifier order.
+    pub fn code_references(&self) -> Result<Vec<CodeReference>, StorageError> {
+        load_json_rows(
+            &self.connection,
+            "SELECT body FROM code_references ORDER BY id",
+            "loading code references",
+        )
+    }
+
     /// Returns workspace entity counts.
     pub fn summary(&self) -> Result<WorkspaceSummary, StorageError> {
         Ok(WorkspaceSummary {
@@ -371,7 +543,7 @@ fn configure(connection: &Connection) -> Result<(), StorageError> {
         .map_err(|source| db("configuring database", source))
 }
 fn migrate(connection: &Connection) -> Result<(), StorageError> {
-    connection.execute_batch("BEGIN; CREATE TABLE IF NOT EXISTS schema_info (version INTEGER NOT NULL); INSERT INTO schema_info(version) SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM schema_info); CREATE TABLE IF NOT EXISTS workspace (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), id TEXT NOT NULL UNIQUE, name TEXT NOT NULL); CREATE TABLE IF NOT EXISTS sources (id TEXT PRIMARY KEY, location TEXT NOT NULL UNIQUE); CREATE TABLE IF NOT EXISTS snapshots (id TEXT PRIMARY KEY, source_id TEXT NOT NULL REFERENCES sources(id), digest TEXT NOT NULL, byte_len INTEGER NOT NULL, UNIQUE(source_id, digest)); CREATE TABLE IF NOT EXISTS artifacts (id TEXT PRIMARY KEY, snapshot_id TEXT NOT NULL REFERENCES snapshots(id), name TEXT NOT NULL, media_type TEXT NOT NULL, byte_len INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS findings (id TEXT PRIMARY KEY, body TEXT NOT NULL); CREATE TABLE IF NOT EXISTS traces (id TEXT PRIMARY KEY, finding_id TEXT NOT NULL UNIQUE REFERENCES findings(id), body TEXT NOT NULL); CREATE TABLE IF NOT EXISTS current_snapshots (source_id TEXT PRIMARY KEY REFERENCES sources(id), snapshot_id TEXT NOT NULL REFERENCES snapshots(id)); CREATE TABLE IF NOT EXISTS relationships (id TEXT PRIMARY KEY, body TEXT NOT NULL); CREATE TABLE IF NOT EXISTS feedback (id TEXT PRIMARY KEY, relationship_id TEXT, body TEXT NOT NULL); CREATE TABLE IF NOT EXISTS code_references (id TEXT PRIMARY KEY, body TEXT NOT NULL); CREATE TABLE IF NOT EXISTS corpus_imports (name TEXT NOT NULL, version TEXT NOT NULL, body TEXT NOT NULL, PRIMARY KEY(name, version)); UPDATE schema_info SET version = 2; COMMIT;").map_err(|source| db("creating schema", source))
+    connection.execute_batch("BEGIN; CREATE TABLE IF NOT EXISTS schema_info (version INTEGER NOT NULL); INSERT INTO schema_info(version) SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM schema_info); CREATE TABLE IF NOT EXISTS workspace (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), id TEXT NOT NULL UNIQUE, name TEXT NOT NULL); CREATE TABLE IF NOT EXISTS sources (id TEXT PRIMARY KEY, location TEXT NOT NULL UNIQUE); CREATE TABLE IF NOT EXISTS snapshots (id TEXT PRIMARY KEY, source_id TEXT NOT NULL REFERENCES sources(id), digest TEXT NOT NULL, byte_len INTEGER NOT NULL, UNIQUE(source_id, digest)); CREATE TABLE IF NOT EXISTS artifacts (id TEXT PRIMARY KEY, snapshot_id TEXT NOT NULL REFERENCES snapshots(id), name TEXT NOT NULL, media_type TEXT NOT NULL, byte_len INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS findings (id TEXT PRIMARY KEY, body TEXT NOT NULL); CREATE TABLE IF NOT EXISTS traces (id TEXT PRIMARY KEY, finding_id TEXT NOT NULL UNIQUE REFERENCES findings(id), body TEXT NOT NULL); CREATE TABLE IF NOT EXISTS current_snapshots (source_id TEXT PRIMARY KEY REFERENCES sources(id), snapshot_id TEXT NOT NULL REFERENCES snapshots(id)); CREATE TABLE IF NOT EXISTS relationships (id TEXT PRIMARY KEY, body TEXT NOT NULL); CREATE TABLE IF NOT EXISTS feedback (id TEXT PRIMARY KEY, relationship_id TEXT, body TEXT NOT NULL); CREATE TABLE IF NOT EXISTS code_references (id TEXT PRIMARY KEY, body TEXT NOT NULL); CREATE TABLE IF NOT EXISTS corpus_imports (name TEXT NOT NULL, version TEXT NOT NULL, body TEXT NOT NULL, PRIMARY KEY(name, version)); CREATE TABLE IF NOT EXISTS investigations (id TEXT PRIMARY KEY, scope TEXT NOT NULL CHECK(scope IN ('personal', 'organization')), body TEXT NOT NULL); UPDATE schema_info SET version = 3; COMMIT;").map_err(|source| db("creating schema", source))
 }
 fn validate_schema(connection: &Connection) -> Result<(), StorageError> {
     let version: i64 = connection
@@ -379,7 +551,7 @@ fn validate_schema(connection: &Connection) -> Result<(), StorageError> {
             row.get(0)
         })
         .map_err(|source| db("reading schema version", source))?;
-    if version == 2 {
+    if version == 3 {
         Ok(())
     } else {
         Err(StorageError::Configuration(format!(
@@ -423,6 +595,7 @@ fn ser(operation: &'static str, source: serde_json::Error) -> StorageError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use loremesh_core::investigation::{InvestigationScope, InvestigationStatus};
 
     #[test]
     fn initialization_and_import_are_idempotent() {
@@ -439,5 +612,103 @@ mod tests {
         assert_eq!(first.artifact.id, second.artifact.id);
         assert_eq!(repository.summary().expect("summary").artifacts, 1);
         repository.doctor().expect("healthy workspace");
+    }
+
+    #[test]
+    fn investigation_reloads_with_canonical_references_and_survives_index_absence() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        LocalRepository::initialize(temporary.path()).expect("initialize");
+        let input = temporary.path().join("sample.md");
+        fs::write(&input, "# Sample\n\nEvidence.\n").expect("fixture");
+        let mut repository = LocalRepository::open(temporary.path()).expect("open");
+        let imported = repository.import_markdown(&input).expect("import");
+        let mut investigation = Investigation::new(
+            loremesh_core::InvestigationId::deterministic("sample investigation"),
+            "Sample investigation",
+            "",
+            InvestigationScope::Personal,
+        )
+        .expect("investigation");
+        investigation.add_item(InvestigationItem::Artifact(imported.artifact.id.clone()));
+        investigation
+            .add_note("Review the source lineage.")
+            .expect("note");
+        investigation
+            .transition_to(InvestigationStatus::InReview)
+            .expect("transition");
+        repository
+            .save_investigation_record(&investigation)
+            .expect("save investigation");
+        drop(repository);
+
+        let repository = LocalRepository::open(temporary.path()).expect("reopen");
+        let loaded = repository
+            .investigation(&investigation.id)
+            .expect("reload investigation");
+        assert_eq!(loaded, investigation);
+        assert_eq!(loaded.scope, InvestigationScope::Personal);
+        assert!(loaded
+            .items
+            .contains(&InvestigationItem::Artifact(imported.artifact.id)));
+        assert!(!temporary
+            .path()
+            .join(".loremesh/indexes/knowledge")
+            .exists());
+    }
+
+    #[test]
+    fn unknown_investigation_reference_is_rejected() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        LocalRepository::initialize(temporary.path()).expect("initialize");
+        let repository = LocalRepository::open(temporary.path()).expect("open");
+        let mut investigation = Investigation::new(
+            loremesh_core::InvestigationId::deterministic("invalid"),
+            "Invalid reference",
+            "",
+            InvestigationScope::Personal,
+        )
+        .expect("investigation");
+        investigation.add_item(InvestigationItem::Artifact(ArtifactId::deterministic(
+            "missing",
+        )));
+        assert!(repository
+            .save_investigation_record(&investigation)
+            .is_err());
+    }
+
+    #[test]
+    fn newer_snapshot_marks_old_evidence_historical_without_redirecting_it() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        LocalRepository::initialize(temporary.path()).expect("initialize");
+        let input = temporary.path().join("sample.md");
+        fs::write(&input, "Old evidence").expect("old fixture");
+        let mut repository = LocalRepository::open(temporary.path()).expect("open");
+        let old = repository.import_markdown(&input).expect("old import");
+        let evidence = loremesh_core::EvidenceReference::new(
+            loremesh_core::ArtifactReference {
+                artifact_id: old.artifact.id.clone(),
+            },
+            0,
+            3,
+            "old",
+            "Old evidence",
+        )
+        .expect("evidence");
+        assert_eq!(
+            repository
+                .evidence_status(&evidence)
+                .expect("current status"),
+            EvidenceStatus::Current
+        );
+        fs::write(&input, "New evidence").expect("new fixture");
+        let new = repository.import_markdown(&input).expect("new import");
+        assert_ne!(old.artifact.snapshot_id, new.artifact.snapshot_id);
+        assert_eq!(evidence.artifact.artifact_id, old.artifact.id);
+        assert_eq!(
+            repository
+                .evidence_status(&evidence)
+                .expect("historical status"),
+            EvidenceStatus::Historical
+        );
     }
 }
