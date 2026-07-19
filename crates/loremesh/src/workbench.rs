@@ -365,7 +365,14 @@ impl TuiCommandHandler {
                 self.code_document = Some(document);
                 Ok((
                     format!("Opened {path} ({lines} lines)"),
-                    Some(text_view(path, rendered)),
+                    Some(ViewContent {
+                        title: path.clone(),
+                        paragraphs: vec![format!("Path: {path}\n\n{rendered}")],
+                        table: None,
+                        chart: None,
+                        mermaid: None,
+                        d2: None,
+                    }),
                 ))
             }
             BrowserCommand::Search(query) => {
