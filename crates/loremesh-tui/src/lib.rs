@@ -308,6 +308,23 @@ pub enum SaveFormat {
     Png,
 }
 
+/// Investigation workflow command parsed without storage access.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InvestigationCommand {
+    New { title: String, organization: bool },
+    List,
+    Open(String),
+    AddCurrent,
+    Add { kind: String, id: String },
+    Remove { kind: String, id: String },
+    Show,
+    Trace,
+    Note(String),
+    Status(String),
+    Save,
+    ExportHtml { output: String },
+}
+
 /// Typed slash command with no shell interpretation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SlashCommand {
@@ -331,6 +348,7 @@ pub enum SlashCommand {
     Shell(ShellCommand),
     Browser(BrowserCommand),
     KnowledgeSearch(String),
+    Investigation(InvestigationCommand),
     Demo(DemoKind),
     Quit,
 }
@@ -369,12 +387,127 @@ pub fn parse_command(input: &str) -> Result<SlashCommand, CommandError> {
         "/open" => one_rest(parts, "usage: /open <path>")
             .map(|path| SlashCommand::Browser(BrowserCommand::Open(path))),
         "/search" => one_rest(parts, "usage: /search <text>").map(SlashCommand::KnowledgeSearch),
+        "/investigation" => parse_investigation(parts),
         "/find" => one_rest(parts, "usage: /find <text>")
             .map(|query| SlashCommand::Browser(BrowserCommand::Search(query))),
         "/quit" | "/exit" => no_args(parts, SlashCommand::Quit),
         "/save" | "/export" => parse_save(parts),
         _ => Err(CommandError(format!("unknown command '{name}'; use /help"))),
     }
+}
+
+#[allow(clippy::too_many_lines)]
+fn parse_investigation<'a>(
+    mut parts: impl Iterator<Item = &'a str>,
+) -> Result<SlashCommand, CommandError> {
+    let action = parts.next().ok_or_else(|| {
+        CommandError(
+            "usage: /investigation <new|list|open|add|remove|show|trace|note|status|save|export>"
+                .into(),
+        )
+    })?;
+    let command = match action {
+        "new" => {
+            let values = parts.collect::<Vec<_>>();
+            let (organization, title_values) = if values.starts_with(&["--scope", "organization"]) {
+                (true, &values[2..])
+            } else if values.starts_with(&["--scope", "personal"]) {
+                (false, &values[2..])
+            } else {
+                (false, values.as_slice())
+            };
+            let title = title_values.join(" ").trim_matches('"').to_owned();
+            if title.is_empty() {
+                return Err(CommandError(
+                    "usage: /investigation new [--scope personal|organization] <title>".into(),
+                ));
+            }
+            InvestigationCommand::New {
+                title,
+                organization,
+            }
+        }
+        "list" => {
+            return no_args(
+                parts,
+                SlashCommand::Investigation(InvestigationCommand::List),
+            )
+        }
+        "open" => InvestigationCommand::Open(one_rest(parts, "usage: /investigation open <id>")?),
+        "add" => match parts.next() {
+            Some("current") => {
+                return no_args(
+                    parts,
+                    SlashCommand::Investigation(InvestigationCommand::AddCurrent),
+                )
+            }
+            Some(kind) => InvestigationCommand::Add {
+                kind: kind.into(),
+                id: parts
+                    .next()
+                    .ok_or_else(|| CommandError("usage: /investigation add <kind> <id>".into()))?
+                    .into(),
+            },
+            None => {
+                return Err(CommandError(
+                    "usage: /investigation add <current|kind id>".into(),
+                ))
+            }
+        },
+        "remove" => InvestigationCommand::Remove {
+            kind: parts
+                .next()
+                .ok_or_else(|| CommandError("usage: /investigation remove <kind> <id>".into()))?
+                .into(),
+            id: parts
+                .next()
+                .ok_or_else(|| CommandError("usage: /investigation remove <kind> <id>".into()))?
+                .into(),
+        },
+        "show" => {
+            return no_args(
+                parts,
+                SlashCommand::Investigation(InvestigationCommand::Show),
+            )
+        }
+        "trace" => {
+            return no_args(
+                parts,
+                SlashCommand::Investigation(InvestigationCommand::Trace),
+            )
+        }
+        "note" => InvestigationCommand::Note(one_rest(parts, "usage: /investigation note <text>")?),
+        "status" => {
+            InvestigationCommand::Status(one_rest(parts, "usage: /investigation status <status>")?)
+        }
+        "save" => {
+            return no_args(
+                parts,
+                SlashCommand::Investigation(InvestigationCommand::Save),
+            )
+        }
+        "export" => {
+            let values = parts.collect::<Vec<_>>();
+            if values.len() != 4
+                || values[0] != "--format"
+                || values[1] != "html"
+                || values[2] != "--output"
+            {
+                return Err(CommandError(
+                    "usage: /investigation export --format html --output <path>".into(),
+                ));
+            }
+            InvestigationCommand::ExportHtml {
+                output: values[3].into(),
+            }
+        }
+        _ => {
+            return Err(CommandError(format!(
+                "unknown investigation action '{action}'"
+            )))
+        }
+    };
+    Ok(SlashCommand::Investigation(command))
 }
 
 fn parse_demo<'a>(mut parts: impl Iterator<Item = &'a str>) -> Result<SlashCommand, CommandError> {
@@ -966,11 +1099,20 @@ fn text_content(title: &str, text: &str) -> ViewContent {
     }
 }
 
-fn help_content() -> ViewContent {
+fn base_help_content() -> ViewContent {
     text_content(
         "LoreMesh command reference",
         "LOREMESH COMMAND REFERENCE\n\nNAVIGATION\n/help\n  Show this complete reference.\n/artifacts\n  Show imported artifacts.\n/findings\n  Show findings.\n/trace\n  Show evidence lineage.\n/search <text>\n  Search canonical knowledge; select with Up/Down and open with Enter.\n\nDEMONSTRATIONS\n/demo table\n/demo chart\n/demo markdown\n/demo code\n/demo shell\n  Open deterministic capability previews; no files, network, model, or shell execution required.\n\nTABLES\n/table load <workspace-relative.csv>\n/table refresh\n/table save <workspace-relative.csv>\n/table sort <column> <asc|desc>\n/table filter <column> <text>\n/table search <text>\n/table columns <column,...>\n/table reset\n\nCHARTS\n/chart <bar|hbar|line|pie> <label-column> <value-column>\n  Requires a loaded table. Example: /chart hbar name duration\n\nFILES AND MARKDOWN\n/browse [workspace-relative-directory]\n/open <workspace-relative-file>\n/find <text>\n  Search within the currently opened file.\n\nLOCAL SHELL\n/shell\n  Start a persistent shell in the workspace. Type commands normally in the bottom composer.\n/exit or Ctrl-D\n  Close the shell and return to LoreMesh command mode.\nCtrl-C\n  Interrupt the current shell command. PgUp/PgDn and Home/End scroll its bounded timeline output.\n  The shell has your OS permissions and may access files or networks. LoreMesh does not retain its command history.\n\nREPORTS\n/save current --format <md|markdown-mermaid|markdown-d2|csv|html|png> [--output <path>]\n/export current --format <format> [--output <path>]\n\nSERVICES\n/services\n/model\n/context\n/compact\n/clear\n\nEXIT\n/quit\n/exit\n  Outside input, q exits. In shell mode /exit returns to LoreMesh and /quit exits the app. Esc changes focus and never exits.",
     )
+}
+
+fn help_content() -> ViewContent {
+    let mut content = base_help_content();
+    content.paragraphs.push(
+        "INVESTIGATIONS\n/investigation new [--scope personal|organization] <title>\n/investigation list\n/investigation open <id>\n/investigation add <current|kind id>\n/investigation remove <kind> <id>\n/investigation show\n/investigation trace\n/investigation note <text>\n/investigation status <draft|in-review|reviewed|archived>\n/investigation save\n/investigation export --format html --output <path>"
+            .into(),
+    );
+    content
 }
 
 fn is_open_document(content: &ViewContent) -> bool {
@@ -1528,6 +1670,36 @@ mod tests {
     fn quit_and_exit_parse_as_clean_quit() {
         assert_eq!(parse_command("/quit"), Ok(SlashCommand::Quit));
         assert_eq!(parse_command("/exit"), Ok(SlashCommand::Quit));
+    }
+
+    #[test]
+    fn investigation_commands_parse_into_typed_state_transitions() {
+        assert_eq!(
+            parse_command("/investigation new \"Feature Alpha Analysis\"")
+                .expect("new investigation"),
+            SlashCommand::Investigation(InvestigationCommand::New {
+                title: "Feature Alpha Analysis".into(),
+                organization: false,
+            })
+        );
+        assert_eq!(
+            parse_command("/investigation add current").expect("add current"),
+            SlashCommand::Investigation(InvestigationCommand::AddCurrent)
+        );
+        assert_eq!(
+            parse_command("/investigation status in-review").expect("status"),
+            SlashCommand::Investigation(InvestigationCommand::Status("in-review".into()))
+        );
+        assert_eq!(
+            parse_command(
+                "/investigation export --format html --output reports/feature-alpha.html"
+            )
+            .expect("export"),
+            SlashCommand::Investigation(InvestigationCommand::ExportHtml {
+                output: "reports/feature-alpha.html".into(),
+            })
+        );
+        assert!(parse_command("/investigation export --format pdf --output report.pdf").is_err());
     }
 
     #[test]

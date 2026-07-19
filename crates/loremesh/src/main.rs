@@ -8,17 +8,24 @@ use std::path::{Component, Path, PathBuf};
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use loremesh_core::index::{LexicalIndex, SearchQuery};
-use loremesh_core::{
-    ArtifactId, ArtifactReference, Claim, ClaimId, EdgeOrigin, EvidenceReference, Finding,
-    FindingId, KnowledgeScope, ReportId, Trace, TraceEdge, TraceEdgeId, TraceId, TraceNode,
-    TraceNodeId, TraceNodeKind, VerificationStatus,
+use loremesh_core::investigation::{
+    Investigation, InvestigationItem, InvestigationScope, InvestigationStatus,
 };
-use loremesh_report::{Metric, Report, ReportBlock, ReportSection, TableModel};
+use loremesh_core::{
+    ArtifactId, ArtifactReference, Claim, ClaimId, CodeReferenceId, EdgeOrigin, EvidenceReference,
+    Finding, FindingId, InvestigationId, KnowledgeScope, RelationshipId, ReportId, Trace,
+    TraceEdge, TraceEdgeId, TraceId, TraceNode, TraceNodeId, TraceNodeKind, VerificationStatus,
+};
+use loremesh_report::{
+    InvestigationLineage, InvestigationReportBuilder, InvestigationReportInput, Metric, Report,
+    ReportBlock, ReportSection, TableModel,
+};
 use loremesh_storage::{CorpusImportLimits, CorpusImportResult, LocalRepository, TantivyIndex};
 use loremesh_tui::grid::DataGrid;
 use loremesh_tui::markdown::MarkdownDocument;
 use loremesh_tui::{
-    CommandHandler, CommandResponse, InputMode, SaveFormat, SlashCommand, ViewContent,
+    CommandHandler, CommandResponse, InputMode, InvestigationCommand, SaveFormat, SlashCommand,
+    ViewContent,
 };
 use tracing::info;
 
@@ -417,6 +424,8 @@ struct TuiCommandHandler {
     code_document: Option<loremesh_tui::browser::CodeDocument>,
     shell_session: Option<workbench::PtySession>,
     pending_input_mode: Option<InputMode>,
+    current_investigation: Option<Investigation>,
+    current_artifact: Option<ArtifactId>,
 }
 
 impl TuiCommandHandler {
@@ -429,6 +438,8 @@ impl TuiCommandHandler {
             code_document: None,
             shell_session: None,
             pending_input_mode: None,
+            current_investigation: None,
+            current_artifact: None,
         }
     }
 
@@ -490,6 +501,7 @@ impl TuiCommandHandler {
             .find(|artifact| artifact.id == id)
             .with_context(|| format!("canonical artifact {id} is not present"))?;
         let content = repository.artifact_content(&artifact)?;
+        self.current_artifact = Some(artifact.id.clone());
         let rendered = MarkdownDocument::parse(&content).render_text();
         self.code_document = Some(loremesh_tui::browser::CodeDocument::from_bytes(
             artifact.id.to_string(),
@@ -511,6 +523,352 @@ impl TuiCommandHandler {
             }),
         ))
     }
+
+    #[allow(clippy::too_many_lines)]
+    fn investigation_command(
+        &mut self,
+        command: &InvestigationCommand,
+    ) -> Result<(String, Option<ViewContent>)> {
+        match command {
+            InvestigationCommand::New {
+                title,
+                organization,
+            } => {
+                let scope = if *organization {
+                    InvestigationScope::Organization
+                } else {
+                    InvestigationScope::Personal
+                };
+                let investigation = Investigation::new(
+                    InvestigationId::deterministic(title.as_bytes()),
+                    title,
+                    "",
+                    scope,
+                )?;
+                let id = investigation.id.clone();
+                self.current_investigation = Some(investigation);
+                Ok(message_result(
+                    "Investigation",
+                    &format!(
+                        "Created draft investigation {id}; use /investigation save to persist"
+                    ),
+                ))
+            }
+            InvestigationCommand::List => {
+                let repository = LocalRepository::open(&self.root)?;
+                let investigations = repository.investigations()?;
+                let count = investigations.len();
+                Ok((
+                    format!("Found {count} investigation(s)"),
+                    Some(ViewContent {
+                        title: "Investigations".into(),
+                        paragraphs: Vec::new(),
+                        table: Some(loremesh_tui::ViewTable {
+                            columns: vec![
+                                "ID".into(),
+                                "Title".into(),
+                                "Scope".into(),
+                                "Status".into(),
+                            ],
+                            rows: investigations
+                                .into_iter()
+                                .map(|value| {
+                                    vec![
+                                        value.id.to_string(),
+                                        value.title,
+                                        format!("{:?}", value.scope),
+                                        format!("{:?}", value.status),
+                                    ]
+                                })
+                                .collect(),
+                        }),
+                        chart: None,
+                        mermaid: None,
+                        d2: None,
+                    }),
+                ))
+            }
+            InvestigationCommand::Open(id) => {
+                let id = InvestigationId::parse(id.clone())?;
+                let repository = LocalRepository::open(&self.root)?;
+                let investigation = repository.investigation(&id)?;
+                self.current_investigation = Some(investigation);
+                self.investigation_show()
+            }
+            InvestigationCommand::AddCurrent => {
+                let artifact = self.current_artifact.clone().context(
+                    "no canonical artifact is current; select/open a knowledge search result first",
+                )?;
+                let investigation = self.current_investigation_mut()?;
+                let changed = investigation.add_item(InvestigationItem::Artifact(artifact));
+                Ok(message_result(
+                    "Investigation",
+                    if changed {
+                        "Added current canonical artifact"
+                    } else {
+                        "Artifact was already collected"
+                    },
+                ))
+            }
+            InvestigationCommand::Add { kind, id } => {
+                let item = parse_investigation_item(kind, id)?;
+                let changed = self.current_investigation_mut()?.add_item(item);
+                Ok(message_result(
+                    "Investigation",
+                    if changed {
+                        "Added canonical reference"
+                    } else {
+                        "Reference was already collected"
+                    },
+                ))
+            }
+            InvestigationCommand::Remove { kind, id } => {
+                let item = parse_investigation_item(kind, id)?;
+                let changed = self.current_investigation_mut()?.remove_item(&item);
+                Ok(message_result(
+                    "Investigation",
+                    if changed {
+                        "Removed canonical reference"
+                    } else {
+                        "Reference was not collected"
+                    },
+                ))
+            }
+            InvestigationCommand::Show => self.investigation_show(),
+            InvestigationCommand::Trace => self.investigation_trace(),
+            InvestigationCommand::Note(text) => {
+                self.current_investigation_mut()?.add_note(text)?;
+                Ok(message_result("Investigation", "Added investigation note"))
+            }
+            InvestigationCommand::Status(status) => {
+                let status = match status.as_str() {
+                    "draft" => InvestigationStatus::Draft,
+                    "in-review" => InvestigationStatus::InReview,
+                    "reviewed" => InvestigationStatus::Reviewed,
+                    "archived" => InvestigationStatus::Archived,
+                    _ => bail!("status must be draft, in-review, reviewed, or archived"),
+                };
+                self.current_investigation_mut()?.transition_to(status)?;
+                Ok(message_result(
+                    "Investigation",
+                    "Investigation status changed; save to persist",
+                ))
+            }
+            InvestigationCommand::Save => {
+                let investigation = self.current_investigation()?.clone();
+                LocalRepository::open(&self.root)?.save_investigation_record(&investigation)?;
+                Ok(message_result(
+                    "Investigation",
+                    &format!("Saved {}", investigation.id),
+                ))
+            }
+            InvestigationCommand::ExportHtml { output } => {
+                let report = self.investigation_report()?;
+                let rendered = loremesh_report::render_html(&report);
+                let relative = Path::new(output);
+                let destination = safe_workspace_output(&self.root, relative)?;
+                if let Some(parent) = destination.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                let temporary = destination.with_extension("html.tmp");
+                fs::write(&temporary, rendered.as_bytes())?;
+                fs::rename(&temporary, &destination)?;
+                Ok(message_result(
+                    "Investigation",
+                    &format!("Exported {output}"),
+                ))
+            }
+        }
+    }
+
+    fn current_investigation(&self) -> Result<&Investigation> {
+        self.current_investigation
+            .as_ref()
+            .context("no investigation is open")
+    }
+
+    fn current_investigation_mut(&mut self) -> Result<&mut Investigation> {
+        self.current_investigation
+            .as_mut()
+            .context("no investigation is open")
+    }
+
+    fn investigation_show(&self) -> Result<(String, Option<ViewContent>)> {
+        let investigation = self.current_investigation()?;
+        let mut counts = [0_usize; 7];
+        for item in &investigation.items {
+            counts[match item {
+                InvestigationItem::Artifact(_) => 0,
+                InvestigationItem::Finding(_) => 1,
+                InvestigationItem::Claim(_) => 2,
+                InvestigationItem::Evidence(_) => 3,
+                InvestigationItem::Relationship(_) => 4,
+                InvestigationItem::Trace(_) => 5,
+                InvestigationItem::CodeReference(_) => 6,
+            }] += 1;
+        }
+        let summary = format!(
+            "Investigation: {}\nID: {}\nStatus: {:?}\nScope: {:?}\n\nArtifacts: {}\nFindings: {}\nClaims: {}\nEvidence: {}\nRelationships: {}\nTraces: {}\nCode references: {}\nNotes: {}",
+            investigation.title, investigation.id, investigation.status, investigation.scope,
+            counts[0], counts[1], counts[2], counts[3], counts[4], counts[5], counts[6], investigation.notes.len()
+        );
+        Ok((
+            "Investigation loaded".into(),
+            Some(message_view("Investigation", &summary)),
+        ))
+    }
+
+    fn investigation_trace(&self) -> Result<(String, Option<ViewContent>)> {
+        let investigation = self.current_investigation()?;
+        let repository = LocalRepository::open(&self.root)?;
+        let findings = repository.findings()?;
+        let mut lines = Vec::new();
+        for finding in findings.iter().filter(|finding| {
+            investigation
+                .items
+                .contains(&InvestigationItem::Finding(finding.id.clone()))
+        }) {
+            lines.push(format!("Finding: {}", finding.title));
+            for claim in &finding.claims {
+                lines.push(format!("  +-- Claim: {}", claim.text));
+                for evidence in &claim.evidence {
+                    let status = repository.evidence_status(evidence)?;
+                    if let Some(artifact) = repository.artifact(&evidence.artifact.artifact_id)? {
+                        let (snapshot, source) = repository.artifact_lineage(&artifact)?;
+                        lines.push(format!("      +-- Evidence: {} [{status:?}]\n          +-- Artifact: {}\n              +-- Snapshot: {}\n                  +-- Source: {}", evidence.label, artifact.name, snapshot.id, source.location));
+                    } else {
+                        lines.push(format!("      +-- Evidence: {} [Missing]", evidence.label));
+                    }
+                }
+            }
+        }
+        for relationship in repository
+            .relationships()?
+            .into_iter()
+            .filter(|relationship| {
+                investigation
+                    .items
+                    .contains(&InvestigationItem::Relationship(relationship.id.clone()))
+            })
+        {
+            lines.push(format!(
+                "Relationship: {}\n  Origin: {:?}\n  Status: {:?}\n  Engine: {}",
+                relationship.relation.as_str(),
+                relationship.origin,
+                relationship.status,
+                relationship
+                    .external_provenance
+                    .as_ref()
+                    .map_or("none", |value| value.provider.as_str())
+            ));
+        }
+        Ok((
+            "Built deterministic investigation trace".into(),
+            Some(message_view("Investigation trace", &lines.join("\n"))),
+        ))
+    }
+
+    fn investigation_report(&self) -> Result<Report> {
+        let investigation = self.current_investigation()?;
+        let repository = LocalRepository::open(&self.root)?;
+        let artifacts = repository
+            .artifacts()?
+            .into_iter()
+            .filter(|artifact| {
+                investigation
+                    .items
+                    .contains(&InvestigationItem::Artifact(artifact.id.clone()))
+            })
+            .collect::<Vec<_>>();
+        let findings = repository
+            .findings()?
+            .into_iter()
+            .filter(|finding| {
+                investigation
+                    .items
+                    .contains(&InvestigationItem::Finding(finding.id.clone()))
+                    || finding.claims.iter().any(|claim| {
+                        investigation
+                            .items
+                            .contains(&InvestigationItem::Claim(claim.id.clone()))
+                    })
+            })
+            .collect::<Vec<_>>();
+        let relationships = repository
+            .relationships()?
+            .into_iter()
+            .filter(|relationship| {
+                investigation
+                    .items
+                    .contains(&InvestigationItem::Relationship(relationship.id.clone()))
+            })
+            .collect::<Vec<_>>();
+        let code_references = repository
+            .code_references()?
+            .into_iter()
+            .filter(|code| {
+                investigation
+                    .items
+                    .contains(&InvestigationItem::CodeReference(code.id.clone()))
+            })
+            .collect::<Vec<_>>();
+        let feedback = repository.feedback()?;
+        let mut lineage = Vec::new();
+        for artifact in &artifacts {
+            let (snapshot, source) = repository.artifact_lineage(artifact)?;
+            let evidence_status = if repository.artifact_references_stale_snapshot(artifact)? {
+                loremesh_core::investigation::EvidenceStatus::Historical
+            } else {
+                loremesh_core::investigation::EvidenceStatus::Current
+            };
+            lineage.push(InvestigationLineage {
+                artifact: artifact.clone(),
+                snapshot,
+                source,
+                evidence_label: None,
+                evidence_status,
+            });
+        }
+        for evidence in findings
+            .iter()
+            .flat_map(|finding| &finding.claims)
+            .flat_map(|claim| &claim.evidence)
+        {
+            if let Some(artifact) = repository.artifact(&evidence.artifact.artifact_id)? {
+                let (snapshot, source) = repository.artifact_lineage(&artifact)?;
+                lineage.push(InvestigationLineage {
+                    artifact,
+                    snapshot,
+                    source,
+                    evidence_label: Some(evidence.label.clone()),
+                    evidence_status: repository.evidence_status(evidence)?,
+                });
+            }
+        }
+        Ok(InvestigationReportBuilder::build(
+            &InvestigationReportInput {
+                investigation,
+                artifacts: &artifacts,
+                findings: &findings,
+                relationships: &relationships,
+                code_references: &code_references,
+                feedback: &feedback,
+                lineage: &lineage,
+            },
+        )?)
+    }
+}
+
+fn parse_investigation_item(kind: &str, id: &str) -> Result<InvestigationItem> {
+    Ok(match kind {
+        "artifact" => InvestigationItem::Artifact(ArtifactId::parse(id.to_owned())?),
+        "finding" => InvestigationItem::Finding(FindingId::parse(id.to_owned())?),
+        "claim" => InvestigationItem::Claim(ClaimId::parse(id.to_owned())?),
+        "relationship" => InvestigationItem::Relationship(RelationshipId::parse(id.to_owned())?),
+        "trace" => InvestigationItem::Trace(TraceId::parse(id.to_owned())?),
+        "code" => InvestigationItem::CodeReference(CodeReferenceId::parse(id.to_owned())?),
+        _ => bail!("item kind must be artifact, finding, claim, relationship, trace, or code"),
+    })
 }
 
 impl CommandHandler for TuiCommandHandler {
@@ -531,6 +889,7 @@ impl CommandHandler for TuiCommandHandler {
             SlashCommand::Shell(command) => self.shell_command(command),
             SlashCommand::Browser(command) => self.browser_command(command),
             SlashCommand::KnowledgeSearch(query) => self.search_knowledge(query),
+            SlashCommand::Investigation(command) => self.investigation_command(command),
             SlashCommand::Demo(kind) => self.demo_command(*kind),
             SlashCommand::Help | SlashCommand::View(_) | SlashCommand::Clear | SlashCommand::Quit => Ok(message_result("Workbench", "Command handled by the workbench shell.")),
         };
@@ -1014,6 +1373,67 @@ mod tests {
         );
         assert_eq!(response.message, "Saved trace.md");
         assert!(response.content.is_none());
+    }
+
+    #[test]
+    fn investigation_command_workflow_persists_reopens_and_exports_html() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        LocalRepository::initialize(directory.path()).expect("initialize");
+        let input = directory.path().join("alpha.md");
+        fs::write(&input, "# Feature Alpha\n\nStable behavior.\n").expect("fixture");
+        let artifact = LocalRepository::open(directory.path())
+            .expect("open")
+            .import_markdown(&input)
+            .expect("import")
+            .artifact;
+        let active = message_view("Workbench", "ready");
+        let mut handler = TuiCommandHandler::new(directory.path().to_path_buf());
+        handler
+            .open_canonical_artifact(artifact.id.as_str())
+            .expect("open artifact");
+        let created = handler.execute(
+            &SlashCommand::Investigation(InvestigationCommand::New {
+                title: "Feature Alpha Analysis".into(),
+                organization: false,
+            }),
+            &active,
+        );
+        assert!(created.message.contains("Created draft investigation"));
+        handler.execute(
+            &SlashCommand::Investigation(InvestigationCommand::AddCurrent),
+            &active,
+        );
+        handler.execute(
+            &SlashCommand::Investigation(InvestigationCommand::Note(
+                "Review source lineage".into(),
+            )),
+            &active,
+        );
+        let saved = handler.execute(
+            &SlashCommand::Investigation(InvestigationCommand::Save),
+            &active,
+        );
+        assert!(saved.message.starts_with("Saved inv_"));
+
+        let id = InvestigationId::deterministic("Feature Alpha Analysis");
+        let mut reopened = TuiCommandHandler::new(directory.path().to_path_buf());
+        let opened = reopened.execute(
+            &SlashCommand::Investigation(InvestigationCommand::Open(id.to_string())),
+            &active,
+        );
+        assert!(opened.message.contains("Investigation loaded"));
+        let exported = reopened.execute(
+            &SlashCommand::Investigation(InvestigationCommand::ExportHtml {
+                output: "reports/feature-alpha.html".into(),
+            }),
+            &active,
+        );
+        assert_eq!(exported.message, "Exported reports/feature-alpha.html");
+        let html = fs::read_to_string(directory.path().join("reports/feature-alpha.html"))
+            .expect("read report");
+        assert!(html.contains("Feature Alpha Analysis"));
+        assert!(html.contains("alpha.md"));
+        assert!(!html.contains(&directory.path().display().to_string()));
     }
 
     #[test]
