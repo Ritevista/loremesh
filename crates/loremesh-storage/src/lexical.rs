@@ -6,13 +6,23 @@ use loremesh_core::index::{
     SearchHit, SearchQuery,
 };
 use loremesh_core::{ArtifactId, SnapshotId, SourceId};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use tantivy::collector::TopDocs;
 use tantivy::query::QueryParser;
 use tantivy::schema::{Schema, TantivyDocument, Value, STORED, STRING, TEXT};
 use tantivy::{doc, Index, IndexReader, IndexWriter, ReloadPolicy, Term};
 
 const INDEX_SCHEMA_VERSION: u32 = 1;
+const INDEX_METADATA_FILE: &str = "loremesh-index.json";
 const WRITER_MEMORY_BYTES: usize = 50_000_000;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct KnowledgeIndexMetadata {
+    schema_version: u32,
+    corpus_signature: String,
+    documents: u64,
+}
 
 pub struct TantivyIndex {
     path: PathBuf,
@@ -25,6 +35,10 @@ impl TantivyIndex {
 
     pub fn knowledge_for_workspace(root: &Path) -> Self {
         Self::new(root.join(".loremesh").join("indexes").join("knowledge"))
+    }
+
+    pub fn metadata_path(&self) -> PathBuf {
+        self.path.join(INDEX_METADATA_FILE)
     }
 
     fn schema() -> Schema {
@@ -61,6 +75,47 @@ impl TantivyIndex {
             .reload_policy(ReloadPolicy::OnCommitWithDelay)
             .try_into()
             .map_err(|error| engine("creating index reader", error))
+    }
+
+    fn workspace_root(&self) -> Option<PathBuf> {
+        self.path.ancestors().nth(3).map(Path::to_path_buf)
+    }
+
+    fn metadata(&self) -> Result<KnowledgeIndexMetadata, LexicalIndexError> {
+        let bytes =
+            fs::read(self.metadata_path()).map_err(|error| io("reading index metadata", &error))?;
+        serde_json::from_slice(&bytes).map_err(|error| {
+            LexicalIndexError::Validation(format!("invalid index metadata: {error}"))
+        })
+    }
+
+    fn write_metadata(&self, metadata: &KnowledgeIndexMetadata) -> Result<(), LexicalIndexError> {
+        let bytes = serde_json::to_vec_pretty(metadata).map_err(|error| {
+            LexicalIndexError::Validation(format!("serializing index metadata failed: {error}"))
+        })?;
+        fs::write(self.metadata_path(), bytes).map_err(|error| io("writing index metadata", &error))
+    }
+
+    fn corpus_signature(documents: &[IndexDocument]) -> String {
+        let mut documents = documents.to_vec();
+        documents.sort_by(|left, right| left.artifact_id.as_str().cmp(right.artifact_id.as_str()));
+        let mut hasher = Sha256::new();
+        for document in documents {
+            hasher.update(document.artifact_id.as_str());
+            hasher.update(document.source_id.as_str());
+            hasher.update(document.snapshot_id.as_str());
+            hasher.update(document.title.as_bytes());
+            hasher.update(document.body.as_bytes());
+            for heading in document.headings {
+                hasher.update(heading.as_bytes());
+            }
+            hasher.update(document.document_type.as_bytes());
+            hasher.update(document.source_type.as_bytes());
+            for tag in document.tags {
+                hasher.update(tag.as_bytes());
+            }
+        }
+        hex::encode(hasher.finalize())
     }
 }
 
@@ -114,6 +169,7 @@ impl LexicalIndex for TantivyIndex {
             .map_err(|error| engine("reading schema version field", error))?;
         let mut writer = Self::writer(&index)?;
         let indexed = documents.len() as u64;
+        let corpus_signature = Self::corpus_signature(&documents);
         for document in documents {
             writer
                 .add_document(doc!(
@@ -136,6 +192,11 @@ impl LexicalIndex for TantivyIndex {
         writer
             .wait_merging_threads()
             .map_err(|error| engine("merging index", error))?;
+        self.write_metadata(&KnowledgeIndexMetadata {
+            schema_version: INDEX_SCHEMA_VERSION,
+            corpus_signature,
+            documents: indexed,
+        })?;
         Ok(IndexBuildResult { indexed })
     }
 
@@ -225,6 +286,41 @@ impl LexicalIndex for TantivyIndex {
         }
         let index = self.open()?;
         let reader = Self::reader(&index)?;
+        let metadata = self.metadata().map_err(|error| match error {
+            LexicalIndexError::Io { .. } | LexicalIndexError::Engine { .. } => error,
+            other => other,
+        })?;
+        if metadata.schema_version != INDEX_SCHEMA_VERSION {
+            return Ok(IndexStatus {
+                state: IndexState::Failed,
+                schema_version: metadata.schema_version,
+                documents: reader.searcher().num_docs(),
+                failure: Some("knowledge index metadata schema version mismatch".into()),
+            });
+        }
+        let workspace_root = self.workspace_root().ok_or_else(|| {
+            LexicalIndexError::Validation(
+                "knowledge index path does not belong to a workspace".into(),
+            )
+        })?;
+        let repository = crate::LocalRepository::open(&workspace_root).map_err(|error| {
+            LexicalIndexError::Validation(format!(
+                "opening workspace for index status failed: {error}"
+            ))
+        })?;
+        let current_signature = repository.knowledge_index_signature().map_err(|error| {
+            LexicalIndexError::Validation(format!("reading workspace signature failed: {error}"))
+        })?;
+        if metadata.corpus_signature != current_signature {
+            return Ok(IndexStatus {
+                state: IndexState::Stale,
+                schema_version: INDEX_SCHEMA_VERSION,
+                documents: reader.searcher().num_docs(),
+                failure: Some(
+                    "knowledge corpus has changed since the index was built; rebuild the knowledge index".into(),
+                ),
+            });
+        }
         Ok(IndexStatus {
             state: IndexState::Ready,
             schema_version: INDEX_SCHEMA_VERSION,

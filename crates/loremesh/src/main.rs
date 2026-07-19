@@ -16,6 +16,7 @@ use loremesh_core::{
 use loremesh_report::{Metric, Report, ReportBlock, ReportSection, TableModel};
 use loremesh_storage::{CorpusImportLimits, CorpusImportResult, LocalRepository, TantivyIndex};
 use loremesh_tui::grid::DataGrid;
+use loremesh_tui::markdown::MarkdownDocument;
 use loremesh_tui::{
     CommandHandler, CommandResponse, InputMode, SaveFormat, SlashCommand, ViewContent,
 };
@@ -432,8 +433,19 @@ impl TuiCommandHandler {
     }
 
     fn search_knowledge(&self, query: &str) -> Result<(String, Option<ViewContent>)> {
-        let hits = TantivyIndex::knowledge_for_workspace(&self.root)
-            .search(&SearchQuery::new(query, 50)?)?;
+        let index = TantivyIndex::knowledge_for_workspace(&self.root);
+        let status = index
+            .status()
+            .map_err(|error| anyhow::anyhow!("checking knowledge index status failed: {error}"))?;
+        if status.state != loremesh_core::index::IndexState::Ready {
+            return Err(anyhow::anyhow!(
+                "{}",
+                status.failure.unwrap_or_else(|| {
+                    "knowledge index is not ready; rebuild before searching".into()
+                })
+            ));
+        }
+        let hits = index.search(&SearchQuery::new(query, 50)?)?;
         let count = hits.len();
         let rows = hits
             .into_iter()
@@ -478,6 +490,7 @@ impl TuiCommandHandler {
             .find(|artifact| artifact.id == id)
             .with_context(|| format!("canonical artifact {id} is not present"))?;
         let content = repository.artifact_content(&artifact)?;
+        let rendered = MarkdownDocument::parse(&content).render_text();
         self.code_document = Some(loremesh_tui::browser::CodeDocument::from_bytes(
             artifact.id.to_string(),
             content.as_bytes(),
@@ -489,7 +502,7 @@ impl TuiCommandHandler {
                 title: artifact.name,
                 paragraphs: vec![format!(
                     "Artifact: {}\nSnapshot: {}\n\n{}",
-                    artifact.id, artifact.snapshot_id, content
+                    artifact.id, artifact.snapshot_id, rendered
                 )],
                 table: None,
                 chart: None,
@@ -536,17 +549,21 @@ impl CommandHandler for TuiCommandHandler {
     }
 
     fn activate(&mut self, active: &ViewContent, row: usize) -> CommandResponse {
-        let result = active.table.as_ref().and_then(|table| {
-            let artifact_column = table
-                .columns
-                .iter()
-                .position(|column| column == "Artifact ID")?;
-            table
-                .rows
-                .get(row)
-                .and_then(|values| values.get(artifact_column))
-                .map(|id| self.open_canonical_artifact(id))
-        });
+        let result = is_knowledge_search_results(active)
+            .then(|| {
+                active.table.as_ref().and_then(|table| {
+                    let artifact_column = table
+                        .columns
+                        .iter()
+                        .position(|column| column == "Artifact ID")?;
+                    table
+                        .rows
+                        .get(row)
+                        .and_then(|values| values.get(artifact_column))
+                        .map(|id| self.open_canonical_artifact(id))
+                })
+            })
+            .flatten();
         match result {
             Some(Ok((message, content))) => CommandResponse {
                 message,
@@ -577,6 +594,18 @@ impl CommandHandler for TuiCommandHandler {
 
 fn message_result(title: &str, message: &str) -> (String, Option<ViewContent>) {
     (message.into(), Some(message_view(title, message)))
+}
+
+fn is_knowledge_search_results(active: &ViewContent) -> bool {
+    active.title.starts_with("Knowledge search: ")
+        && active.table.as_ref().is_some_and(|table| {
+            table.columns.len() == 5
+                && table.columns[0] == "Title"
+                && table.columns[1] == "Artifact ID"
+                && table.columns[2] == "Source ID"
+                && table.columns[3] == "Snapshot ID"
+                && table.columns[4] == "Score"
+        })
 }
 
 fn message_view(title: &str, message: &str) -> ViewContent {
@@ -1021,6 +1050,59 @@ mod tests {
         );
         assert!(found.message.starts_with("Found "));
         assert!(!found.message.starts_with("Found 0 "));
+    }
+
+    #[test]
+    fn tui_search_rejects_stale_indexes() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        LocalRepository::initialize(workspace.path()).expect("initialize");
+        let mut repository = LocalRepository::open(workspace.path()).expect("open");
+        repository
+            .import_corpus_manifest(&corpus_fixture(), CorpusImportLimits::default())
+            .expect("import corpus");
+        let mut index = TantivyIndex::knowledge_for_workspace(workspace.path());
+        index
+            .rebuild(repository.index_documents().expect("documents"))
+            .expect("build index");
+        let import = workspace.path().join("fresh.md");
+        fs::write(&import, "# Fresh\n\nnew content\n").expect("write fresh file");
+        repository
+            .import_markdown(&import)
+            .expect("import fresh file");
+        let handler = TuiCommandHandler::new(workspace.path().to_path_buf());
+        let error = handler
+            .search_knowledge("bounded retry")
+            .expect_err("stale index should be rejected");
+        assert!(error.to_string().contains("rebuild"));
+    }
+
+    #[test]
+    fn arbitrary_artifact_id_tables_do_not_open_canonical_artifacts() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        LocalRepository::initialize(workspace.path()).expect("initialize");
+        let mut handler = TuiCommandHandler::new(workspace.path().to_path_buf());
+        let active = ViewContent {
+            title: "CSV import".into(),
+            paragraphs: vec!["Path: sample.csv\n\nvalues".into()],
+            table: Some(ViewTable {
+                columns: vec![
+                    "Artifact ID".into(),
+                    "Source ID".into(),
+                    "Snapshot ID".into(),
+                ],
+                rows: vec![vec![
+                    "artifact:fake".into(),
+                    "source:fake".into(),
+                    "snapshot:fake".into(),
+                ]],
+            }),
+            chart: None,
+            mermaid: None,
+            d2: None,
+        };
+        let response = handler.activate(&active, 0);
+        assert_eq!(response.message, "Selected row 1");
+        assert!(response.content.is_none());
     }
 
     #[test]

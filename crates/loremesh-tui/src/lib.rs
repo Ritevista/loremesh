@@ -663,7 +663,8 @@ impl ShellState {
             KeyCode::Char('f')
                 if self.focus == Focus::Primary
                     && self.content(view).table.is_none()
-                    && self.content(view).chart.is_none() =>
+                    && self.content(view).chart.is_none()
+                    && is_open_document(self.content(view)) =>
             {
                 self.begin_find();
             }
@@ -970,6 +971,12 @@ fn help_content() -> ViewContent {
         "LoreMesh command reference",
         "LOREMESH COMMAND REFERENCE\n\nNAVIGATION\n/help\n  Show this complete reference.\n/artifacts\n  Show imported artifacts.\n/findings\n  Show findings.\n/trace\n  Show evidence lineage.\n/search <text>\n  Search canonical knowledge; select with Up/Down and open with Enter.\n\nDEMONSTRATIONS\n/demo table\n/demo chart\n/demo markdown\n/demo code\n/demo shell\n  Open deterministic capability previews; no files, network, model, or shell execution required.\n\nTABLES\n/table load <workspace-relative.csv>\n/table refresh\n/table save <workspace-relative.csv>\n/table sort <column> <asc|desc>\n/table filter <column> <text>\n/table search <text>\n/table columns <column,...>\n/table reset\n\nCHARTS\n/chart <bar|hbar|line|pie> <label-column> <value-column>\n  Requires a loaded table. Example: /chart hbar name duration\n\nFILES AND MARKDOWN\n/browse [workspace-relative-directory]\n/open <workspace-relative-file>\n/find <text>\n  Search within the currently opened file.\n\nLOCAL SHELL\n/shell\n  Start a persistent shell in the workspace. Type commands normally in the bottom composer.\n/exit or Ctrl-D\n  Close the shell and return to LoreMesh command mode.\nCtrl-C\n  Interrupt the current shell command. PgUp/PgDn and Home/End scroll its bounded timeline output.\n  The shell has your OS permissions and may access files or networks. LoreMesh does not retain its command history.\n\nREPORTS\n/save current --format <md|markdown-mermaid|markdown-d2|csv|html|png> [--output <path>]\n/export current --format <format> [--output <path>]\n\nSERVICES\n/services\n/model\n/context\n/compact\n/clear\n\nEXIT\n/quit\n/exit\n  Outside input, q exits. In shell mode /exit returns to LoreMesh and /quit exits the app. Esc changes focus and never exits.",
     )
+}
+
+fn is_open_document(content: &ViewContent) -> bool {
+    content.paragraphs.first().is_some_and(|paragraph| {
+        paragraph.starts_with("Path: ") || paragraph.starts_with("Artifact: ")
+    })
 }
 
 /// Runs the interactive shell until a quit command or key is received.
@@ -1790,7 +1797,7 @@ mod tests {
         let mut handler = Handler;
         state.show_content(ViewContent {
             title: "Knowledge search".into(),
-            paragraphs: Vec::new(),
+            paragraphs: vec!["Path: demo.md\n\nArchitecture body".into()],
             table: Some(ViewTable {
                 columns: vec!["Title".into()],
                 rows: vec![vec!["Architecture".into()]],
@@ -1799,7 +1806,14 @@ mod tests {
             mermaid: None,
             d2: None,
         });
-        state.show_content(text_content("Architecture", "document body"));
+        state.show_content(ViewContent {
+            title: "Architecture".into(),
+            paragraphs: vec!["Path: architecture.md\n\ndocument body".into()],
+            table: None,
+            chart: None,
+            mermaid: None,
+            d2: None,
+        });
         state.handle_key(
             KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE),
             &view,
@@ -1826,6 +1840,21 @@ mod tests {
             &mut handler,
         );
         assert_eq!(state.content(&view).title, "Knowledge search");
+    }
+
+    #[test]
+    fn find_is_not_enabled_for_plain_text_panels() {
+        let mut state = ShellState::default();
+        let view = view();
+        let mut handler = Handler;
+        state.show_content(text_content("Help", "plain text panel"));
+        state.handle_key(
+            KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE),
+            &view,
+            &mut handler,
+        );
+        assert_eq!(state.focus, Focus::Primary);
+        assert_eq!(state.input_mode, InputMode::LoreMesh);
     }
 
     #[test]

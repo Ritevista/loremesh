@@ -497,6 +497,28 @@ impl LocalRepository {
         }
         Ok(documents)
     }
+
+    pub fn knowledge_index_signature(&self) -> Result<String, StorageError> {
+        let mut documents = self.index_documents()?;
+        documents.sort_by(|left, right| left.artifact_id.as_str().cmp(right.artifact_id.as_str()));
+        let mut hasher = Sha256::new();
+        for document in documents {
+            hasher.update(document.artifact_id.as_str());
+            hasher.update(document.source_id.as_str());
+            hasher.update(document.snapshot_id.as_str());
+            hasher.update(document.title.as_bytes());
+            hasher.update(document.body.as_bytes());
+            for heading in document.headings {
+                hasher.update(heading.as_bytes());
+            }
+            hasher.update(document.document_type.as_bytes());
+            hasher.update(document.source_type.as_bytes());
+            for tag in document.tags {
+                hasher.update(tag.as_bytes());
+            }
+        }
+        Ok(hex::encode(hasher.finalize()))
+    }
 }
 
 fn unique_ids<'a>(
