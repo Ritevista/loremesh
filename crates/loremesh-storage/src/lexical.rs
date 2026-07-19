@@ -78,10 +78,7 @@ impl TantivyIndex {
     }
 
     fn workspace_root(&self) -> Option<PathBuf> {
-        self.path
-            .ancestors()
-            .nth(3)
-            .map(Path::to_path_buf)
+        self.path.ancestors().nth(3).map(Path::to_path_buf)
     }
 
     fn metadata(&self) -> Result<KnowledgeIndexMetadata, LexicalIndexError> {
