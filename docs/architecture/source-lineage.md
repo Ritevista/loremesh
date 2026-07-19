@@ -8,6 +8,8 @@ The two lineages may meet at evidence but are not interchangeable. A processing 
 
 Current-source state is also not historical evidence: when source snapshot B supersedes snapshot A, an older finding remains attached to A and may be reported as stale evidence. Index rebuilds always project both identity and current-state metadata explicitly; they never rewrite the finding.
 
+Investigation views use the neutral labels `Current`, `Historical`, and `Missing`. `Historical` means a newer current snapshot exists and does not invalidate or redirect the cited immutable bytes. `Missing` means the canonical chain cannot currently be resolved and is reported rather than repaired.
+
 ```d2
 direction: right
 
