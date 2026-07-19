@@ -9,9 +9,9 @@ use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use loremesh_core::index::{LexicalIndex, SearchQuery};
 use loremesh_core::{
-    ArtifactReference, Claim, ClaimId, EdgeOrigin, EvidenceReference, Finding, FindingId,
-    KnowledgeScope, ReportId, Trace, TraceEdge, TraceEdgeId, TraceId, TraceNode, TraceNodeId,
-    TraceNodeKind, VerificationStatus,
+    ArtifactId, ArtifactReference, Claim, ClaimId, EdgeOrigin, EvidenceReference, Finding,
+    FindingId, KnowledgeScope, ReportId, Trace, TraceEdge, TraceEdgeId, TraceId, TraceNode,
+    TraceNodeId, TraceNodeKind, VerificationStatus,
 };
 use loremesh_report::{Metric, Report, ReportBlock, ReportSection, TableModel};
 use loremesh_storage::{CorpusImportLimits, CorpusImportResult, LocalRepository, TantivyIndex};
@@ -430,6 +430,74 @@ impl TuiCommandHandler {
             pending_input_mode: None,
         }
     }
+
+    fn search_knowledge(&self, query: &str) -> Result<(String, Option<ViewContent>)> {
+        let hits = TantivyIndex::knowledge_for_workspace(&self.root)
+            .search(&SearchQuery::new(query, 50)?)?;
+        let count = hits.len();
+        let rows = hits
+            .into_iter()
+            .map(|hit| {
+                vec![
+                    hit.title,
+                    hit.artifact_id.to_string(),
+                    hit.source_id.to_string(),
+                    hit.snapshot_id.to_string(),
+                    format!("{:.3}", hit.score),
+                ]
+            })
+            .collect();
+        Ok((
+            format!("Found {count} canonical artifact(s)"),
+            Some(ViewContent {
+                title: format!("Knowledge search: {query}"),
+                paragraphs: Vec::new(),
+                table: Some(loremesh_tui::ViewTable {
+                    columns: vec![
+                        "Title".into(),
+                        "Artifact ID".into(),
+                        "Source ID".into(),
+                        "Snapshot ID".into(),
+                        "Score".into(),
+                    ],
+                    rows,
+                }),
+                chart: None,
+                mermaid: None,
+                d2: None,
+            }),
+        ))
+    }
+
+    fn open_canonical_artifact(&mut self, id: &str) -> Result<(String, Option<ViewContent>)> {
+        let id = ArtifactId::parse(id.to_owned())?;
+        let repository = LocalRepository::open(&self.root)?;
+        let artifact = repository
+            .artifacts()?
+            .into_iter()
+            .find(|artifact| artifact.id == id)
+            .with_context(|| format!("canonical artifact {id} is not present"))?;
+        let content = repository.artifact_content(&artifact)?;
+        self.code_document = Some(loremesh_tui::browser::CodeDocument::from_bytes(
+            artifact.id.to_string(),
+            content.as_bytes(),
+            content.len(),
+        )?);
+        Ok((
+            format!("Opened canonical artifact {}", artifact.id),
+            Some(ViewContent {
+                title: artifact.name,
+                paragraphs: vec![format!(
+                    "Artifact: {}\nSnapshot: {}\n\n{}",
+                    artifact.id, artifact.snapshot_id, content
+                )],
+                table: None,
+                chart: None,
+                mermaid: None,
+                d2: None,
+            }),
+        ))
+    }
 }
 
 impl CommandHandler for TuiCommandHandler {
@@ -449,6 +517,7 @@ impl CommandHandler for TuiCommandHandler {
             SlashCommand::Chart { kind, label_column, value_column } => self.chart_command(*kind, label_column, value_column),
             SlashCommand::Shell(command) => self.shell_command(command),
             SlashCommand::Browser(command) => self.browser_command(command),
+            SlashCommand::KnowledgeSearch(query) => self.search_knowledge(query),
             SlashCommand::Demo(kind) => self.demo_command(*kind),
             SlashCommand::Help | SlashCommand::View(_) | SlashCommand::Clear | SlashCommand::Quit => Ok(message_result("Workbench", "Command handled by the workbench shell.")),
         };
@@ -462,6 +531,37 @@ impl CommandHandler for TuiCommandHandler {
                 message: format!("Command failed: {error:#}"),
                 content: Some(message_view("Command failed", &format!("{error:#}"))),
                 input_mode: self.pending_input_mode.take(),
+            },
+        }
+    }
+
+    fn activate(&mut self, active: &ViewContent, row: usize) -> CommandResponse {
+        let result = active.table.as_ref().and_then(|table| {
+            let artifact_column = table
+                .columns
+                .iter()
+                .position(|column| column == "Artifact ID")?;
+            table
+                .rows
+                .get(row)
+                .and_then(|values| values.get(artifact_column))
+                .map(|id| self.open_canonical_artifact(id))
+        });
+        match result {
+            Some(Ok((message, content))) => CommandResponse {
+                message,
+                content,
+                input_mode: None,
+            },
+            Some(Err(error)) => CommandResponse {
+                message: format!("Could not open selection: {error:#}"),
+                content: None,
+                input_mode: None,
+            },
+            None => CommandResponse {
+                message: format!("Selected row {}", row.saturating_add(1)),
+                content: None,
+                input_mode: None,
             },
         }
     }
@@ -826,7 +926,13 @@ fn export_report(format: ExportFormat, requested: Option<&Path>) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use loremesh_tui::ViewTable;
+    use loremesh_tui::{BrowserCommand, ViewTable};
+
+    fn corpus_fixture() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .join("tests/fixtures/knowledge-base/corpus.json")
+    }
 
     fn trace_view() -> ViewContent {
         ViewContent {
@@ -879,6 +985,42 @@ mod tests {
         );
         assert_eq!(response.message, "Saved trace.md");
         assert!(response.content.is_none());
+    }
+
+    #[test]
+    fn tui_search_resolves_hits_to_canonical_artifact_content() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        LocalRepository::initialize(workspace.path()).expect("initialize");
+        let mut repository = LocalRepository::open(workspace.path()).expect("open");
+        repository
+            .import_corpus_manifest(&corpus_fixture(), CorpusImportLimits::default())
+            .expect("import corpus");
+        let mut index = TantivyIndex::knowledge_for_workspace(workspace.path());
+        index
+            .rebuild(repository.index_documents().expect("documents"))
+            .expect("build index");
+        let mut handler = TuiCommandHandler::new(workspace.path().to_path_buf());
+        let response = handler.execute(
+            &SlashCommand::KnowledgeSearch("bounded retry".into()),
+            &trace_view(),
+        );
+        let search = response.content.expect("search results");
+        assert!(search.title.contains("bounded retry"));
+        let table = search.table.as_ref().expect("table");
+        assert!(!table.rows.is_empty());
+        let artifact_id = table.rows[0][1].clone();
+        let snapshot_id = table.rows[0][3].clone();
+        let opened = handler.activate(&search, 0);
+        let content = opened.content.expect("canonical artifact");
+        assert!(content.paragraphs[0].contains(&format!("Artifact: {artifact_id}")));
+        assert!(content.paragraphs[0].contains(&format!("Snapshot: {snapshot_id}")));
+        assert!(content.paragraphs[0].contains("retry"));
+        let found = handler.execute(
+            &SlashCommand::Browser(BrowserCommand::Search("retry".into())),
+            &content,
+        );
+        assert!(found.message.starts_with("Found "));
+        assert!(!found.message.starts_with("Found 0 "));
     }
 
     #[test]

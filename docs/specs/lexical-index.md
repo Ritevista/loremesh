@@ -22,7 +22,7 @@ An engineer builds a knowledge index, searches titles/bodies/headings/tags, dele
 
 ## Functional requirements
 
-The port supports build/rebuild, remove, search, status, and drop. Documents contain artifact/source/snapshot IDs, title, body, headings, document/source types, and tags. Search returns typed IDs, score, and a bounded escaped excerpt. States are `NotBuilt`, `Building`, `Ready`, `Stale`, and `Failed`. `loremesh index build knowledge`, `index status`, `index search <query>`, and `index drop knowledge` operate only on `.loremesh/indexes/knowledge`.
+The port supports build/rebuild, remove, search, status, and drop. Documents contain artifact/source/snapshot IDs, title, body, headings, document/source types, and tags. Search returns typed IDs, score, and a bounded escaped excerpt. States are `NotBuilt`, `Building`, `Ready`, `Stale`, and `Failed`. `loremesh index build knowledge`, `index status`, `index search <query>`, and `index drop knowledge` operate only on `.loremesh/indexes/knowledge`. In the TUI, `/search <query>` searches this corpus index and returns a selectable table containing canonical artifact, source, and snapshot IDs. Up/Down changes selection and Enter resolves the selected hit through canonical storage before displaying its immutable artifact content. A missing or stale index fails actionably and never falls back to an unbounded corpus scan.
 
 ## Domain model
 

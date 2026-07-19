@@ -30,7 +30,7 @@ Markdown presentation supports headings, paragraphs, emphasis, lists, block quot
 
 Fenced `mermaid` and `d2` blocks retain exact source and expose Source and Diagram modes. A small documented graph subset is projected into the renderer-neutral trace/graph view for deterministic terminal display. Unsupported syntax produces a diagnostic and falls back to highlighted source. An optional, explicitly configured local subprocess renderer may later produce sanitized SVG or PNG exports with a timeout, bounded output, no network promise, and version metadata; its absence never degrades ordinary Markdown reading.
 
-Commands include `/browse`, `/open`, `/search`, `/search-next`, `/search-prev`, `/markdown source|rendered`, and `/diagram source|rendered`. Names may be consolidated when command completion is introduced, but observable behavior and safe path rules remain stable.
+Commands include `/browse`, `/open`, `/find`, `/search-next`, `/search-prev`, `/markdown source|rendered`, and `/diagram source|rendered`. The direct `f` shortcut is the normal way to search the focused document: it accepts plain text in a labelled Find composer and leaves the document visible while reporting matching locations. `/find <text>` remains an automation/accessibility equivalent and works for both mutable workspace files and canonical artifacts opened from corpus results. `/search <text>` is reserved for canonical knowledge-corpus search so users never accidentally search the wrong scope. `b` returns from an opened canonical artifact to its prior result table. Names may be consolidated when command completion is introduced, but observable behavior and safe path rules remain stable.
 
 ## Domain model
 
