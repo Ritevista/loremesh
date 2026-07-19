@@ -11,6 +11,7 @@ use thiserror::Error;
 
 pub mod corpus;
 pub mod index;
+pub mod investigation;
 pub mod relationship;
 
 /// Domain validation and invariant failures.
@@ -100,6 +101,7 @@ identifier!(ReportId, "rpt");
 identifier!(SavedViewId, "viw");
 identifier!(RelationshipId, "rel");
 identifier!(CodeReferenceId, "cod");
+identifier!(InvestigationId, "inv");
 
 /// Local workspace descriptor.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
